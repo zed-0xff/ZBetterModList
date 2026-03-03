@@ -1,8 +1,8 @@
 .gradle
 *.class
-*.jar
 *.log
 *.tmp
 *.swp
 
-reports
+build
+tmp
