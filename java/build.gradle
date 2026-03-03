@@ -19,11 +19,28 @@ dependencies {
     } else {
         compileOnly files("${GAME_DIR}/java/ProjectZomboid.jar")
     }
+
+    implementation 'net.java.dev.jna:jna:5.18.1'
 }
 
 def MOD_ID = project.projectDir.parentFile.name
 jar {
     archiveBaseName.set("${MOD_ID}-${ZVersion}")
+
+    // Create fat JAR - include all dependencies
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    // Exclude META-INF files from dependencies to avoid conflicts
+    // Keep our own META-INF/MANIFEST.MF
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+    exclude 'META-INF/*.MF'
+    exclude 'META-INF/versions/**'
+    exclude '*.dll'
+    exclude '*.dlz'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 repositories {
