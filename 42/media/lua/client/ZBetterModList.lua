@@ -4,7 +4,32 @@ require "OptionScreens/ModSelector/ModListBox"
 ZBetterModList = ZBetterModList or {
     known_mods_before = nil,
     known_mods_after = nil,
+    -- Workshop IDs to hide from getModDirectoryTable (unsubscribed this session). Paths containing "/108600/<id>/mods/" are excluded.
+    hideWorkshopIds = {},
 }
+
+-- Override getModDirectoryTable so unsubscribed workshop mod paths are removed from the list.
+local orig_getModDirectoryTable = getModDirectoryTable
+function getModDirectoryTable()
+    local full = orig_getModDirectoryTable()
+    local out = {}
+    local n = 0
+    for i = 1, #full do
+        local path = full[i]
+        local hide = false
+        for workshopId in pairs(ZBetterModList.hideWorkshopIds) do
+            if path:find("/108600/" .. workshopId .. "/mods/", 1, true) then
+                hide = true
+                break
+            end
+        end
+        if not hide then
+            n = n + 1
+            out[n] = path
+        end
+    end
+    return out
+end
 
 local MOD_ID = "ZBetterModList"
 
@@ -76,7 +101,7 @@ end
 local function formatAge(timestamp)
     if timestamp == 0 then return "" end
     local diff = os.time() - timestamp
-    if diff < 60 then return diff .. "s" end
+    if diff < 60 then return "< 1m" end
     if diff < 3600 then return math.floor(diff / 60) .. "m" end
     if diff < 86400 then return math.floor(diff / 3600) .. "h" end
     if diff < 86400 * 30 then return math.floor(diff / 86400) .. "d" end
@@ -275,12 +300,63 @@ local function onWorkshopBtn(workshopID)
     activateSteamOverlayToWorkshopItem(workshopID)
 end
 
+-- Returns true if any mod in this workshop package is currently enabled (so unsubscribe should be blocked).
+local function isAnyModInPackageEnabled(workshopID, currentModInfo)
+    if not workshopID or not getActivatedMods then return false end
+    local activeModIDs = getActivatedMods()
+    if not activeModIDs or activeModIDs:size() == 0 then return false end
+
+    if getSteamWorkshopItemMods then
+        local mods = getSteamWorkshopItemMods(workshopID)
+        if mods and not mods:isEmpty() then
+            for i = 1, mods:size() do
+                local modID = mods:get(i - 1)
+                for j = 1, activeModIDs:size() do
+                    if activeModIDs:get(j - 1) == modID then return true end
+                end
+            end
+        end
+    end
+
+    if currentModInfo then
+        local thisID = currentModInfo:getId()
+        for j = 1, activeModIDs:size() do
+            if activeModIDs:get(j - 1) == thisID then return true end
+        end
+    end
+    return false
+end
+
+local function onUnsubscribeBtn(panel)
+    local workshopID = panel.workshopID
+    if not workshopID or not ModListHelper then return end
+    if isAnyModInPackageEnabled(workshopID, panel.modInfo) then
+        return
+    end
+    local ok = ModListHelper.unsubscribeFromWorkshopItem(workshopID)
+    if not ok then return end
+    ZBetterModList.hideWorkshopIds[workshopID] = true
+    if ModSelector.instance then
+        ModSelector.instance:reloadMods()
+        ModSelector.instance.modInfoPanel:setVisible(false)
+    end
+end
+
 local orig_titleCreateChildren = ModInfoPanel.Title.createChildren
 function ModInfoPanel.Title:createChildren()
     orig_titleCreateChildren(self)
 
-    local btnW = getTextManager():MeasureStringX(UIFont.Small, getText("UI_modselector_openWorkshopPage")) + UI_BORDER_SPACING * 2
-    self.workshopBtn = ISButton:new(self.width - btnW - UI_BORDER_SPACING, UI_BORDER_SPACING + 1, btnW, BUTTON_HGT, getText("UI_modselector_openWorkshopPage"), self, function(self) onWorkshopBtn(self.workshopID) end)
+    local workshopBtnW = getTextManager():MeasureStringX(UIFont.Small, getText("UI_modselector_openWorkshopPage")) + UI_BORDER_SPACING * 2
+    local unsubLabel = "Unsubscribe"
+    local unsubBtnW = getTextManager():MeasureStringX(UIFont.Small, unsubLabel) + UI_BORDER_SPACING * 2
+
+    self.unsubscribeBtn = ISButton:new(self.width - workshopBtnW - UI_BORDER_SPACING - unsubBtnW - UI_BORDER_SPACING, UI_BORDER_SPACING + 1, unsubBtnW, BUTTON_HGT, unsubLabel, self, onUnsubscribeBtn)
+    self.unsubscribeBtn:initialise()
+    self.unsubscribeBtn:instantiate()
+    self.unsubscribeBtn:enableCancelColor()
+    self:addChild(self.unsubscribeBtn)
+
+    self.workshopBtn = ISButton:new(self.width - workshopBtnW - UI_BORDER_SPACING, UI_BORDER_SPACING + 1, workshopBtnW, BUTTON_HGT, getText("UI_modselector_openWorkshopPage"), self, function(self) onWorkshopBtn(self.workshopID) end)
     self.workshopBtn:initialise()
     self.workshopBtn:instantiate()
     self:addChild(self.workshopBtn)
@@ -289,9 +365,18 @@ end
 local orig_titleSetModInfo = ModInfoPanel.Title.setModInfo
 function ModInfoPanel.Title:setModInfo(modInfo)
     orig_titleSetModInfo(self, modInfo)
+    self.modInfo = modInfo
     local workshopID = getWorkshopID(modInfo)
     self.workshopID = workshopID
-    self.workshopBtn:setVisible(workshopID ~= nil)
+    local visible = workshopID ~= nil
+
+    self.workshopBtn:setVisible(visible)
+
+    if self.unsubscribeBtn then
+        self.unsubscribeBtn:setVisible(visible)
+        local canUnsubscribe = visible and not isAnyModInPackageEnabled(workshopID, modInfo)
+        self.unsubscribeBtn:setEnable(canUnsubscribe)
+    end
 end
 
 --- Fix incompatible panel height after vanilla overrides it
