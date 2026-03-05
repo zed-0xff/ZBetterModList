@@ -3,10 +3,9 @@ package me.zed_0xff.zb_better_modlist;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
-import zombie.core.znet.SteamUtils;
-import zombie.gameStates.ChooseGameInfo;
 
 import me.zed_0xff.zombie_buddy.Exposer;
+import zombie.gameStates.ChooseGameInfo;
 
 @Exposer.LuaClass
 public class ModListHelper {
@@ -37,21 +36,11 @@ public class ModListHelper {
         }
     }
 
-    /**
-     * Unsubscribe from a Steam Workshop mod by its workshop ID (e.g. "1234567890").
-     * Backend only: sends the request to Steam; the item is removed after the game quits.
-     *
-     * @param workshopId Workshop published file ID as string (from mod info / getWorkshopID).
-     * @return true if the unsubscribe request was sent, false if Steam unavailable or invalid ID.
-     */
-    public static boolean unsubscribeFromWorkshopItem(String workshopId) {
-        if (workshopId == null || workshopId.isEmpty()) {
-            return false;
+    public static long[] toLongArray(ArrayList<String> list) {
+        long[] result = new long[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            result[i] = Long.parseLong(list.get(i));
         }
-        if (!SteamUtils.isValidSteamID(workshopId)) {
-            return false;
-        }
-        long id = SteamUtils.convertStringToSteamID(workshopId);
-        return SteamUGCJNA.unsubscribeItem(id);
+        return result;
     }
 }

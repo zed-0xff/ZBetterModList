@@ -1,6 +1,17 @@
 require "OptionScreens/ModSelector/ModListPanel"
 require "OptionScreens/ModSelector/ModListBox"
 
+-- Steam UGC query constants (global)
+PZ_APP_ID = 108600
+k_EUGCQuery_RankedByVote = 0
+k_EUGCQuery_RankedByPublicationDate = 1
+k_EUGCQuery_RankedByTrend = 3
+k_EUGCQuery_RankedByVotesUp = 10
+k_EUGCQuery_RankedByLastUpdatedDate = 19
+k_EUGCMatchingUGCType_Items = 0
+k_EUGCMatchingUGCType_Items_ReadyToUse = 2
+k_EUGCMatchingUGCType_UsableInGame = 10
+
 local MOD_ID = "ZBetterModList"
 local PZ_ID  = 108600
 
@@ -92,6 +103,7 @@ local function writeSortOrder(order)
     end
 end
 
+-- for some reason vanilla getWorkshopID() does not always work (returns empty string)
 local function getWorkshopID(modInfo)
     local workshopID = modInfo:getWorkshopID()
     if workshopID and workshopID ~= "" then
