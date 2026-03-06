@@ -204,15 +204,20 @@ public final class SteamUGC {
      * {@code SteamUGCDetails_t} struct contents. The caller is responsible for providing a buffer
      * large enough for the current SDK's struct size.
      */
+    private static final boolean DEBUG_GET_QUERY_UGC = true;
+
     public static boolean GetQueryUGCResult(Number handle, int index, byte[] pDetails) {
         if (pDetails == null || pDetails.length == 0) return false;
         Pointer ugc = getUGC();
         if (ugc == null) return false;
         long h = toHandle(handle);
         if (h == 0) return false;
+        if (DEBUG_GET_QUERY_UGC && index <= 4) System.out.println("[ZB SteamUGC] GetQueryUGCResult native call index=" + index + " bufLen=" + pDetails.length);
         Pointer mem = new Memory(pDetails.length);
         boolean ok = SteamAPI.INSTANCE.SteamAPI_ISteamUGC_GetQueryUGCResult(ugc, h, index, mem);
+        if (DEBUG_GET_QUERY_UGC && index <= 4) System.out.println("[ZB SteamUGC] GetQueryUGCResult native returned index=" + index + " ok=" + ok);
         if (ok) mem.read(0, pDetails, 0, pDetails.length);
+        if (DEBUG_GET_QUERY_UGC && index <= 4) System.out.println("[ZB SteamUGC] GetQueryUGCResult mem.read done index=" + index);
         return ok;
     }
 

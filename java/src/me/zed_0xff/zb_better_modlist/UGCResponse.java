@@ -18,6 +18,7 @@ public final class UGCResponse {
     private static final int STRING_BUFFER_SIZE = 256;
     private static final int MAX_CHILDREN = 64;
     private static final int MAX_CONTENT_DESCRIPTORS = 32;
+    private static final boolean DEBUG = true;
 
     private long handle;
     private final int resultCount;
@@ -25,6 +26,7 @@ public final class UGCResponse {
     UGCResponse(long handle, int resultCount) {
         this.handle = handle;
         this.resultCount = resultCount;
+        if (DEBUG) System.out.println("[ZB UGCResponse] created handle=" + handle + " resultCount=" + resultCount);
     }
 
     /**
@@ -198,8 +200,10 @@ public final class UGCResponse {
      */
     public void Release() {
         if (handle != 0) {
+            if (DEBUG) System.out.println("[ZB UGCResponse] Release() handle=" + handle);
             SteamUGC.ReleaseQueryUGCRequest(Long.valueOf(handle));
             handle = 0;
+            if (DEBUG) System.out.println("[ZB UGCResponse] Release() done");
         }
     }
 
