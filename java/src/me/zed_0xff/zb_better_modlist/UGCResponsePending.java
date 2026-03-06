@@ -18,13 +18,6 @@ public final class UGCResponsePending {
     private static final long POLL_MS = 50;
     private static final long TIMEOUT_MS = 15_000L;
     private static final int RESULTS_PER_PAGE = 50;
-    /** Must be >= sizeof(SteamUGCDetails_t) in the Steam SDK; 1024 was too small and caused native crash at index 3+. */
-    private static final int DETAILS_BUFFER_SIZE = 65536;
-    private static final boolean DEBUG = true;
-
-    private static String dbgThread() {
-        return Thread.currentThread().getName();
-    }
 
     private volatile long queryHandle;
     private volatile long apiCallHandle;
@@ -35,23 +28,17 @@ public final class UGCResponsePending {
     UGCResponsePending(long queryHandle, long apiCallHandle) {
         this.queryHandle = queryHandle;
         this.apiCallHandle = apiCallHandle;
-        if (DEBUG) System.out.println("[ZB UGCResponsePending] created queryHandle=" + queryHandle + " apiCallHandle=" + apiCallHandle + " thread=" + dbgThread());
         Thread t = new Thread(this::runWorker, "UGCResponsePending-worker");
         t.setDaemon(true);
         t.start();
     }
 
     private void runWorker() {
-        if (DEBUG) System.out.println("[ZB UGCResponsePending] worker started");
         try {
             long deadline = System.currentTimeMillis() + TIMEOUT_MS;
-            int polls = 0;
             while (queryHandle != 0 && apiCallHandle != 0 && System.currentTimeMillis() < deadline) {
                 boolean completed = SteamUtils.IsAPICallCompleted(Long.valueOf(apiCallHandle));
-                polls++;
-                if (DEBUG && (polls <= 3 || polls % 100 == 0)) System.out.println("[ZB UGCResponsePending] poll #" + polls + " IsAPICallCompleted=" + completed);
                 if (completed) {
-                    if (DEBUG) System.out.println("[ZB UGCResponsePending] completed, signaling main thread to build");
                     handleReadyToBuild.set(queryHandle);
                     queryHandle = 0;
                     apiCallHandle = 0;
@@ -60,19 +47,15 @@ public final class UGCResponsePending {
                 Thread.sleep(POLL_MS);
             }
             if (queryHandle != 0) {
-                if (DEBUG) System.out.println("[ZB UGCResponsePending] timeout or exit, releasing handle (polls=" + polls + ")");
                 SteamUGC.ReleaseQueryUGCRequest(Long.valueOf(queryHandle));
                 queryHandle = 0;
                 apiCallHandle = 0;
             }
         } catch (Throwable t) {
-            System.out.println("[ZB UGCResponsePending] worker throw: " + t);
-            t.printStackTrace();
             if (queryHandle != 0) SteamUGC.ReleaseQueryUGCRequest(Long.valueOf(queryHandle));
             queryHandle = 0;
             apiCallHandle = 0;
         }
-        if (DEBUG) System.out.println("[ZB UGCResponsePending] worker finished");
     }
 
     /**
@@ -84,64 +67,58 @@ public final class UGCResponsePending {
     public ArrayList<KahluaTable> poll() {
         long h = handleReadyToBuild.getAndSet(0);
         if (h != 0) {
-            if (DEBUG) System.out.println("[ZB UGCResponsePending] poll() handle ready, building h=" + h + " thread=" + dbgThread());
             cachedList = buildResponseTable(h);
-            if (DEBUG) System.out.println("[ZB UGCResponsePending] poll() buildResponseTable done");
         }
         return cachedList;
     }
 
     /** Builds the response list for the given query handle; call after IsAPICallCompleted. Caller must not release handle. */
     static ArrayList<KahluaTable> buildResponseTable(long queryHandle) {
-        if (DEBUG) System.out.println("[ZB UGCResponsePending] buildResponseTable() entry queryHandle=" + queryHandle + " thread=" + dbgThread());
         ArrayList<KahluaTable> list = new ArrayList<>();
-        if (DEBUG) System.out.println("[ZB UGCResponsePending] buildResponseTable() creating UGCResponse");
         UGCResponse resp = new UGCResponse(queryHandle, RESULTS_PER_PAGE);
-        byte[] detailsBuf = new byte[DETAILS_BUFFER_SIZE];
         Long handleObj = Long.valueOf(queryHandle);
         for (int i = 0; i < RESULTS_PER_PAGE; i++) {
-            if (DEBUG && i <= 4) System.out.println("[ZB UGCResponsePending] buildResponseTable() loop start i=" + i);
-            if (DEBUG && i <= 4) System.out.println("[ZB UGCResponsePending] buildResponseTable() GetQueryUGCResult call i=" + i);
+            byte[] detailsBuf = new byte[20_000];
             boolean gotResult = SteamUGC.GetQueryUGCResult(handleObj, i, detailsBuf);
-            if (DEBUG && i <= 4) System.out.println("[ZB UGCResponsePending] buildResponseTable() GetQueryUGCResult returned i=" + i + " ok=" + gotResult);
             if (!gotResult) break;
-            long id = readU64LE(detailsBuf, 0);
+            SteamUGC.DecodedUGCDetails details = SteamUGC.DecodeUGCDetails(detailsBuf);
+            long id = details != null ? details.publishedFileId : 0;
             String modId = id != 0 ? Long.toString(id) : "";
-            if (DEBUG && i <= 4) System.out.println("[ZB UGCResponsePending] buildResponseTable() GetQueryUGCPreviewURL i=" + i);
             String previewURL = resp.GetQueryUGCPreviewURL(i);
-            if (DEBUG && i <= 4) System.out.println("[ZB UGCResponsePending] buildResponseTable() GetQueryUGCMetadata i=" + i);
             String metadata = resp.GetQueryUGCMetadata(i);
-            int numTags = resp.GetQueryUGCNumTags(i);
+            String tagsStr = details != null ? details.tagsCsv : "";
 
-            if (DEBUG && i <= 4) System.out.println("[ZB UGCResponsePending] buildResponseTable() newTable item i=" + i + " numTags=" + numTags);
             KahluaTable item = LuaManager.platform.newTable();
             item.rawset("modId", modId);
+            String title = details != null ? details.title : "";
+            if (title != null && !title.isEmpty()) item.rawset("title", title);
+            String description = details != null ? details.description : "";
+            if (description != null && !description.isEmpty()) item.rawset("description", description);
+            String url = details != null ? details.url : "";
+            if (url != null && !url.isEmpty()) item.rawset("url", url);
+            String fileName = details != null ? details.fileName : "";
+            if (fileName != null && !fileName.isEmpty()) item.rawset("fileName", fileName);
+            if (details != null && details.fileSize != 0) item.rawset("fileSize", Double.valueOf(details.fileSize));
+            if (details != null && details.votesUp != 0) item.rawset("votesUp", Double.valueOf(details.votesUp));
+            if (details != null && details.votesDown != 0) item.rawset("votesDown", Double.valueOf(details.votesDown));
+            if (details != null && details.score != 0) item.rawset("score", Double.valueOf(details.score));
+            if (details != null && details.numChildren != 0) item.rawset("numChildren", Double.valueOf(details.numChildren));
             if (previewURL != null && !previewURL.isEmpty()) item.rawset("previewURL", previewURL);
             if (metadata != null && !metadata.isEmpty()) item.rawset("metadata", metadata);
-            if (numTags > 0) {
-                if (DEBUG && i <= 4) System.out.println("[ZB UGCResponsePending] buildResponseTable() creating tags table i=" + i);
+            if (tagsStr != null && !tagsStr.isEmpty()) {
+                String[] parts = tagsStr.split(",");
                 KahluaTable tags = LuaManager.platform.newTable();
                 int tagIdx = 0;
-                for (int j = 0; j < numTags; j++) {
-                    String tag = resp.GetQueryUGCTag(i, j);
-                    if (tag != null && !tag.isEmpty()) tags.rawset(Double.valueOf(++tagIdx), tag);
+                for (String p : parts) {
+                    if (p == null) continue;
+                    String tag = p.trim();
+                    if (!tag.isEmpty()) tags.rawset(Double.valueOf(++tagIdx), tag);
                 }
                 if (tagIdx > 0) item.rawset("tags", tags);
-                if (DEBUG && i <= 4) System.out.println("[ZB UGCResponsePending] buildResponseTable() tags done i=" + i);
             }
             list.add(item);
-            if (DEBUG && i <= 4) System.out.println("[ZB UGCResponsePending] buildResponseTable() list.add done i=" + i);
         }
-        if (DEBUG) System.out.println("[ZB UGCResponsePending] buildResponseTable() Release resp, list.size=" + list.size());
         resp.Release();
-        if (DEBUG) System.out.println("[ZB UGCResponsePending] buildResponseTable() done");
         return list;
-    }
-
-    private static long readU64LE(byte[] buf, int offset) {
-        if (buf == null || offset + 8 > buf.length) return 0;
-        long lo = (buf[offset] & 0xFF) | ((buf[offset + 1] & 0xFF) << 8) | ((buf[offset + 2] & 0xFF) << 16) | ((buf[offset + 3] & 0xFF) << 24);
-        long hi = (buf[offset + 4] & 0xFF) | ((buf[offset + 5] & 0xFF) << 8) | ((buf[offset + 6] & 0xFF) << 16) | ((buf[offset + 7] & 0xFF) << 24);
-        return (hi << 32) | (lo & 0xFFFFFFFFL);
     }
 }

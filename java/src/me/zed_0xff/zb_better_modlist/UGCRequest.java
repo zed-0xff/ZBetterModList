@@ -9,19 +9,15 @@ import se.krka.kahlua.vm.KahluaTable;
 
 /**
  * Lua-visible object that encapsulates UGCQueryHandle_t. Create via {@link #Create(Number, Number, Number)},
- * configure with setSearchText / setReturn* / setMatchAnyTag / setRankedByTrendDays, then call {@link #send()} or {@link #sendAsync()}.
+ * configure with setSearchText / setReturn* / setMatchAnyTag / setRankedByTrendDays / setAllowCachedResponse, then call {@link #send()} or {@link #sendAsync()}.
  */
 @Exposer.LuaClass
 public final class UGCRequest {
 
-    private static final int PZ_APP_ID = 108600;
-    private static final long SEND_TIMEOUT_MS = 15_000L;
-    private static final long POLL_MS = 50;
-    private static final boolean DEBUG = true;
-
-    private static String dbgThread() {
-        return Thread.currentThread().getName();
-    }
+    private static final int PZ_APP_ID         = 108600;
+    private static final long SEND_TIMEOUT_MS  = 15_000L;
+    private static final long POLL_MS          = 50;
+    private static final int MAX_CACHE_SECONDS = 600;
 
     private long handle;
 
@@ -29,72 +25,65 @@ public final class UGCRequest {
         this.handle = handle;
     }
 
-    public boolean setSearchText(String searchText) {
-        if (handle == 0) return false;
-        return SteamUGC.SetSearchText(handle, searchText != null ? searchText : "");
+    public UGCRequest setSearchText(String searchText) {
+        if (handle != 0) SteamUGC.SetSearchText(handle, searchText != null ? searchText : "");
+        return this;
     }
 
-    public boolean setReturnAdditionalPreviews(boolean value) {
-        if (handle == 0) return false;
-        return SteamUGC.SetReturnAdditionalPreviews(handle, value);
+    public UGCRequest setReturnAdditionalPreviews(boolean value) {
+        if (handle != 0) SteamUGC.SetReturnAdditionalPreviews(handle, value);
+        return this;
     }
 
-    public boolean setReturnChildren(boolean value) {
-        if (handle == 0) return false;
-        return SteamUGC.SetReturnChildren(handle, value);
+    public UGCRequest setReturnChildren(boolean value) {
+        if (handle != 0) SteamUGC.SetReturnChildren(handle, value);
+        return this;
     }
 
-    public boolean setReturnKeyValueTags(boolean value) {
-        if (handle == 0) return false;
-        return SteamUGC.SetReturnKeyValueTags(handle, value);
+    public UGCRequest setReturnKeyValueTags(boolean value) {
+        if (handle != 0) SteamUGC.SetReturnKeyValueTags(handle, value);
+        return this;
     }
 
-    public boolean setReturnLongDescription(boolean value) {
-        if (handle == 0) return false;
-        return SteamUGC.SetReturnLongDescription(handle, value);
+    public UGCRequest setReturnLongDescription(boolean value) {
+        if (handle != 0) SteamUGC.SetReturnLongDescription(handle, value);
+        return this;
     }
 
-    public boolean setReturnMetadata(boolean value) {
-        if (handle == 0) return false;
-        return SteamUGC.SetReturnMetadata(handle, value);
+    public UGCRequest setReturnMetadata(boolean value) {
+        if (handle != 0) SteamUGC.SetReturnMetadata(handle, value);
+        return this;
     }
 
-    public boolean setReturnOnlyIDs(boolean value) {
-        if (handle == 0) return false;
-        return SteamUGC.SetReturnOnlyIDs(handle, value);
+    public UGCRequest setReturnOnlyIDs(boolean value) {
+        if (handle != 0) SteamUGC.SetReturnOnlyIDs(handle, value);
+        return this;
     }
 
-    public boolean setReturnTotalOnly(boolean value) {
-        if (handle == 0) return false;
-        return SteamUGC.SetReturnTotalOnly(handle, value);
+    public UGCRequest setReturnTotalOnly(boolean value) {
+        if (handle != 0) SteamUGC.SetReturnTotalOnly(handle, value);
+        return this;
     }
 
-    public boolean setReturnPlaytimeStats(int unDays) {
-        if (handle == 0) return false;
-        return SteamUGC.SetReturnPlaytimeStats(handle, unDays);
+    public UGCRequest setReturnPlaytimeStats(int unDays) {
+        if (handle != 0) SteamUGC.SetReturnPlaytimeStats(handle, unDays);
+        return this;
     }
 
-    public boolean setMatchAnyTag(boolean bMatchAnyTag) {
-        if (handle == 0) return false;
-        return SteamUGC.SetMatchAnyTag(handle, bMatchAnyTag);
+    public UGCRequest setMatchAnyTag(boolean bMatchAnyTag) {
+        if (handle != 0) SteamUGC.SetMatchAnyTag(handle, bMatchAnyTag);
+        return this;
     }
 
-    public boolean setRankedByTrendDays(int unDays) {
-        if (handle == 0) return false;
-        return SteamUGC.SetRankedByTrendDays(handle, unDays);
+    public UGCRequest setRankedByTrendDays(int unDays) {
+        if (handle != 0) SteamUGC.SetRankedByTrendDays(handle, unDays);
+        return this;
     }
 
-    /** Shortcut: set all SetReturn* options so the response includes everything possible. Playtime stats use 30 days. */
-    public void setReturnAll() {
-        if (handle == 0) return;
-        SteamUGC.SetReturnAdditionalPreviews(handle, true);
-        SteamUGC.SetReturnChildren(handle, true);
-        SteamUGC.SetReturnKeyValueTags(handle, true);
-        SteamUGC.SetReturnLongDescription(handle, true);
-        SteamUGC.SetReturnMetadata(handle, true);
-        SteamUGC.SetReturnOnlyIDs(handle, false);
-        SteamUGC.SetReturnTotalOnly(handle, false);
-        SteamUGC.SetReturnPlaytimeStats(handle, 30);
+    /** Allow cached query results. maxAgeSeconds > 0 enables cache (e.g. 600); 0 disables. */
+    public UGCRequest setAllowCachedResponse(int maxAgeSeconds) {
+        if (handle != 0) SteamUGC.SetAllowCachedResponse(handle, maxAgeSeconds);
+        return this;
     }
 
     /**
@@ -106,12 +95,10 @@ public final class UGCRequest {
      * @return new UGCRequest, or null if creation failed (Steam unavailable / invalid params).
      */
     public static UGCRequest Create(Number queryType, Number matchingType, Number page) {
-        if (DEBUG) System.out.println("[ZB UGCRequest] Create() entry thread=" + dbgThread());
         int q = queryType != null ? queryType.intValue() : 19;
         int m = matchingType != null ? matchingType.intValue() : 0;
         int p = page != null ? page.intValue() : 1;
         long h = SteamUGC.CreateQueryAllUGCRequest(q, m, PZ_APP_ID, PZ_APP_ID, p);
-        if (DEBUG) System.out.println("[ZB UGCRequest] Create() CreateQueryAllUGCRequest returned handle=" + h);
         if (h == 0 || h == -1) return null;
         return new UGCRequest(h);
     }
@@ -120,10 +107,11 @@ public final class UGCRequest {
      * Sends the query and blocks until the response is ready (Java-side polling on a worker thread). Returns a list of item tables (modId, and optionally previewURL, metadata, tags) or null on failure/timeout.
      */
     public ArrayList<KahluaTable> send() {
-        if (DEBUG) System.out.println("[ZB UGCRequest] send() entry handle=" + handle + " thread=" + dbgThread());
         if (handle == 0) return null;
+
+        SteamUGC.SetAllowCachedResponse(handle, MAX_CACHE_SECONDS);
         long hAPICall = SteamUGC.SendQueryUGCRequest(handle);
-        if (DEBUG) System.out.println("[ZB UGCRequest] send() SendQueryUGCRequest returned hAPICall=" + hAPICall);
+
         if (hAPICall == 0) {
             SteamUGC.ReleaseQueryUGCRequest(handle);
             handle = 0;
@@ -134,28 +122,22 @@ public final class UGCRequest {
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<Long> completedHandle = new AtomicReference<>();
         Thread worker = new Thread(() -> {
-            if (DEBUG) System.out.println("[ZB UGCRequest] send() worker started");
             try {
                 long deadline = System.currentTimeMillis() + SEND_TIMEOUT_MS;
                 while (System.currentTimeMillis() < deadline) {
                     if (SteamUtils.IsAPICallCompleted(Long.valueOf(hAPICall))) {
-                        if (DEBUG) System.out.println("[ZB UGCRequest] send() worker: API completed, setting handle");
                         completedHandle.set(Long.valueOf(h));
                         break;
                     }
                     Thread.sleep(POLL_MS);
                 }
                 if (completedHandle.get() == null) {
-                    if (DEBUG) System.out.println("[ZB UGCRequest] send() worker: timeout, releasing handle");
                     SteamUGC.ReleaseQueryUGCRequest(Long.valueOf(h));
                 }
             } catch (Throwable t) {
-                System.out.println("[ZB UGCRequest] send() worker throw: " + t);
-                t.printStackTrace();
                 SteamUGC.ReleaseQueryUGCRequest(Long.valueOf(h));
             } finally {
                 latch.countDown();
-                if (DEBUG) System.out.println("[ZB UGCRequest] send() worker finished");
             }
         }, "UGCRequest-send-worker");
         worker.setDaemon(true);
@@ -167,22 +149,19 @@ public final class UGCRequest {
             return null;
         }
         Long handleToBuild = completedHandle.get();
-        if (DEBUG) System.out.println("[ZB UGCRequest] send() await done handleToBuild=" + handleToBuild);
         if (handleToBuild == null || handleToBuild.longValue() == 0) return null;
-        if (DEBUG) System.out.println("[ZB UGCRequest] send() calling buildResponseTable thread=" + dbgThread());
-        ArrayList<KahluaTable> result = UGCResponsePending.buildResponseTable(handleToBuild.longValue());
-        if (DEBUG) System.out.println("[ZB UGCRequest] send() buildResponseTable done size=" + (result != null ? result.size() : -1));
-        return result;
+        return UGCResponsePending.buildResponseTable(handleToBuild.longValue());
     }
 
     /**
      * Sends the query and returns a poller; call poll() each frame until it returns the response table.
      */
     public UGCResponsePending sendAsync() {
-        if (DEBUG) System.out.println("[ZB UGCRequest] sendAsync() entry handle=" + handle);
         if (handle == 0) return null;
+
+        SteamUGC.SetAllowCachedResponse(handle, MAX_CACHE_SECONDS);
         long hAPICall = SteamUGC.SendQueryUGCRequest(handle);
-        if (DEBUG) System.out.println("[ZB UGCRequest] sendAsync() SendQueryUGCRequest returned hAPICall=" + hAPICall);
+
         if (hAPICall == 0) {
             SteamUGC.ReleaseQueryUGCRequest(handle);
             handle = 0;
@@ -190,7 +169,6 @@ public final class UGCRequest {
         }
         long h = handle;
         handle = 0;
-        if (DEBUG) System.out.println("[ZB UGCRequest] sendAsync() creating UGCResponsePending");
         return new UGCResponsePending(h, hAPICall);
     }
 }

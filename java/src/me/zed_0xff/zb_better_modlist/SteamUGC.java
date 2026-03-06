@@ -4,6 +4,9 @@ import com.sun.jna.Library;
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
+import com.sun.jna.Structure;
+import com.sun.jna.Structure.FieldOrder;
+import java.nio.charset.StandardCharsets;
 import me.zed_0xff.zombie_buddy.Exposer;
 
 /**
@@ -15,6 +18,11 @@ import me.zed_0xff.zombie_buddy.Exposer;
 public final class SteamUGC {
 
     private static final String LIBRARY = "steam_api";
+    private static final int TITLE_LEN = 129;
+    private static final int DESC_LEN = 8000;
+    private static final int TAGS_LEN = 1025;
+    private static final int FILENAME_LEN = 260;
+    private static final int URL_LEN = 256;
 
     public interface SteamAPI extends Library {
         SteamAPI INSTANCE = load();
@@ -61,6 +69,7 @@ public final class SteamUGC {
         boolean SteamAPI_ISteamUGC_SetMatchAnyTag(Pointer self, long handle, boolean bMatchAnyTag);
         boolean SteamAPI_ISteamUGC_SetRankedByTrendDays(Pointer self, long handle, int unDays);
         boolean SteamAPI_ISteamUGC_SetReturnPlaytimeStats(Pointer self, long handle, int unDays);
+        boolean SteamAPI_ISteamUGC_SetAllowCachedResponse(Pointer self, long handle, int unMaxAgeSeconds);
     }
 
     private static volatile Pointer steamUGC;
@@ -77,6 +86,262 @@ public final class SteamUGC {
     }
 
     private static long toHandle(Number n) { return n != null ? n.longValue() : 0; }
+
+    public static final class DecodedUGCDetails {
+        public long publishedFileId;
+        public int eResult;
+        public int eFileType;
+        public int creatorAppId;
+        public int consumerAppId;
+        public String title;
+        public String description;
+        public long steamIdOwner;
+        public long timeCreated;
+        public long timeUpdated;
+        public long timeAddedToUserList;
+        public int visibility;
+        public boolean banned;
+        public boolean acceptedForUse;
+        public boolean tagsTruncated;
+        public String tagsCsv;
+        public long fileHandle;
+        public long previewFileHandle;
+        public String fileName;
+        public int fileSize;
+        public int previewFileSize;
+        public String url;
+        public long votesUp;
+        public long votesDown;
+        public float score;
+        public long numChildren;
+        public int assumedPack;
+    }
+
+    /**
+     * Decode a raw SteamUGCDetails_t byte buffer. Steamworks pack differs across builds; we try
+     * both 4 and 8 and pick the one that yields a sane URL/score/votes.
+     */
+    public static DecodedUGCDetails DecodeUGCDetails(byte[] raw) {
+        DecodedUGCDetails d4 = decodeUGCDetails(raw, 4);
+        DecodedUGCDetails d8 = decodeUGCDetails(raw, 8);
+        return pickBetter(d4, d8);
+    }
+
+    private static DecodedUGCDetails pickBetter(DecodedUGCDetails a, DecodedUGCDetails b) {
+        if (a == null) return b;
+        if (b == null) return a;
+
+        boolean aUrl = looksLikeUrl(a.url);
+        boolean bUrl = looksLikeUrl(b.url);
+        if (aUrl && !bUrl) return a;
+        if (bUrl && !aUrl) return b;
+
+        boolean aScore = looksReasonableScore(a.score);
+        boolean bScore = looksReasonableScore(b.score);
+        if (aScore && !bScore) return a;
+        if (bScore && !aScore) return b;
+
+        boolean aVotes = looksReasonableVotes(a.votesUp, a.votesDown);
+        boolean bVotes = looksReasonableVotes(b.votesUp, b.votesDown);
+        if (aVotes && !bVotes) return a;
+        if (bVotes && !aVotes) return b;
+
+        // Prefer pack=4 by default (common in Steamworks structs).
+        return a.assumedPack == 4 ? a : b;
+    }
+
+    private static boolean looksLikeUrl(String s) {
+        if (s == null) return false;
+        return s.startsWith("https://") || s.startsWith("http://");
+    }
+
+    private static boolean looksReasonableScore(float f) {
+        return !Float.isNaN(f) && f >= 0.0f && f <= 1.0f;
+    }
+
+    private static boolean looksReasonableVotes(long up, long down) {
+        if (up < 0 || down < 0) return false;
+        // Workshop items rarely have > 10M votes; reject absurd values.
+        return up <= 10_000_000L && down <= 10_000_000L;
+    }
+
+    private static int align(int off, int pack) {
+        int m = pack - 1;
+        return (off + m) & ~m;
+    }
+
+    private static long readU32LE(byte[] buf, int offset) {
+        if (buf == null || offset + 4 > buf.length) return 0;
+        int v = (buf[offset] & 0xFF)
+                | ((buf[offset + 1] & 0xFF) << 8)
+                | ((buf[offset + 2] & 0xFF) << 16)
+                | ((buf[offset + 3] & 0xFF) << 24);
+        return Integer.toUnsignedLong(v);
+    }
+
+    private static int readI32LE(byte[] buf, int offset) {
+        if (buf == null || offset + 4 > buf.length) return 0;
+        return (buf[offset] & 0xFF)
+                | ((buf[offset + 1] & 0xFF) << 8)
+                | ((buf[offset + 2] & 0xFF) << 16)
+                | ((buf[offset + 3] & 0xFF) << 24);
+    }
+
+    private static long readU64LE(byte[] buf, int offset) {
+        if (buf == null || offset + 8 > buf.length) return 0;
+        long lo = (buf[offset] & 0xFFL)
+                | ((buf[offset + 1] & 0xFFL) << 8)
+                | ((buf[offset + 2] & 0xFFL) << 16)
+                | ((buf[offset + 3] & 0xFFL) << 24);
+        long hi = (buf[offset + 4] & 0xFFL)
+                | ((buf[offset + 5] & 0xFFL) << 8)
+                | ((buf[offset + 6] & 0xFFL) << 16)
+                | ((buf[offset + 7] & 0xFFL) << 24);
+        return (hi << 32) | (lo & 0xFFFFFFFFL);
+    }
+
+    private static float readF32LE(byte[] buf, int offset) {
+        return Float.intBitsToFloat(readI32LE(buf, offset));
+    }
+
+    private static String readCString(byte[] buf, int offset, int maxLen) {
+        if (buf == null || maxLen <= 0 || offset < 0 || offset >= buf.length) return "";
+        int end = Math.min(buf.length, offset + maxLen);
+        int len = 0;
+        while (offset + len < end && buf[offset + len] != 0) len++;
+        if (len <= 0) return "";
+        return new String(buf, offset, len, StandardCharsets.UTF_8).trim();
+    }
+
+    private static DecodedUGCDetails decodeUGCDetails(byte[] raw, int pack) {
+        if (raw == null) return null;
+
+        DecodedUGCDetails d = new DecodedUGCDetails();
+        d.assumedPack = pack;
+
+        d.publishedFileId = readU64LE(raw, 0);
+        d.eResult = readI32LE(raw, 8);
+        d.eFileType = readI32LE(raw, 12);
+        d.creatorAppId = (int) readU32LE(raw, 16);
+        d.consumerAppId = (int) readU32LE(raw, 20);
+
+        int offTitle = 24;
+        int offDesc = offTitle + TITLE_LEN;
+        d.title = readCString(raw, offTitle, TITLE_LEN);
+        d.description = readCString(raw, offDesc, DESC_LEN);
+
+        int offOwner = align(offDesc + DESC_LEN, pack);
+        d.steamIdOwner = readU64LE(raw, offOwner);
+
+        int offTimes = offOwner + 8;
+        d.timeCreated = readU32LE(raw, offTimes);
+        d.timeUpdated = readU32LE(raw, offTimes + 4);
+        d.timeAddedToUserList = readU32LE(raw, offTimes + 8);
+        d.visibility = readI32LE(raw, offTimes + 12);
+
+        int offBools = offTimes + 16;
+        d.banned = offBools < raw.length && raw[offBools] != 0;
+        d.acceptedForUse = offBools + 1 < raw.length && raw[offBools + 1] != 0;
+        d.tagsTruncated = offBools + 2 < raw.length && raw[offBools + 2] != 0;
+
+        int offTags = offBools + 3;
+        d.tagsCsv = readCString(raw, offTags, TAGS_LEN);
+
+        int offFile = align(offTags + TAGS_LEN, pack);
+        d.fileHandle = readU64LE(raw, offFile);
+        d.previewFileHandle = readU64LE(raw, offFile + 8);
+
+        int offFileName = offFile + 16;
+        d.fileName = readCString(raw, offFileName, FILENAME_LEN);
+
+        int offSizes = offFileName + FILENAME_LEN;
+        d.fileSize = readI32LE(raw, offSizes);
+        d.previewFileSize = readI32LE(raw, offSizes + 4);
+
+        int offUrl = offSizes + 8;
+        d.url = readCString(raw, offUrl, URL_LEN);
+
+        int offVotes = offUrl + URL_LEN;
+        d.votesUp = readU32LE(raw, offVotes);
+        d.votesDown = readU32LE(raw, offVotes + 4);
+        d.score = readF32LE(raw, offVotes + 8);
+        d.numChildren = readU32LE(raw, offVotes + 12);
+
+        return d;
+    }
+
+    @FieldOrder({
+            "m_nPublishedFileId",
+            "m_eResult",
+            "m_eFileType",
+            "m_nCreatorAppID",
+            "m_nConsumerAppID",
+            "m_rgchTitle",
+            "m_rgchDescription",
+            "m_ulSteamIDOwner",
+            "m_rtimeCreated",
+            "m_rtimeUpdated",
+            "m_rtimeAddedToUserList",
+            "m_eVisibility",
+            "m_bBanned",
+            "m_bAcceptedForUse",
+            "m_bTagsTruncated",
+            "m_rgchTags",
+            "m_hFile",
+            "m_hPreviewFile",
+            "m_pchFileName",
+            "m_nFileSize",
+            "m_nPreviewFileSize",
+            "m_rgchURL",
+            "m_unVotesUp",
+            "m_unVotesDown",
+            "m_flScore",
+            "m_unNumChildren"
+    })
+    public static final class SteamUGCDetails extends Structure {
+        public long m_nPublishedFileId;            // PublishedFileId_t (uint64)
+        public int m_eResult;                      // EResult (int32)
+        public int m_eFileType;                    // EWorkshopFileType (int32)
+        public int m_nCreatorAppID;                // AppId_t (uint32)
+        public int m_nConsumerAppID;               // AppId_t (uint32)
+        public byte[] m_rgchTitle = new byte[129]; // char[129]
+        public byte[] m_rgchDescription = new byte[8000]; // char[8000]
+        public long m_ulSteamIDOwner;              // uint64
+        public int m_rtimeCreated;                 // uint32
+        public int m_rtimeUpdated;                 // uint32
+        public int m_rtimeAddedToUserList;         // uint32
+        public int m_eVisibility;                  // ERemoteStoragePublishedFileVisibility (int32)
+        public byte m_bBanned;                     // bool (1 byte)
+        public byte m_bAcceptedForUse;             // bool (1 byte)
+        public byte m_bTagsTruncated;              // bool (1 byte)
+        public byte[] m_rgchTags = new byte[1025]; // char[1025]
+        public long m_hFile;                       // UGCHandle_t (uint64)
+        public long m_hPreviewFile;                // UGCHandle_t (uint64)
+        public byte[] m_pchFileName = new byte[260]; // char[260]
+        public int m_nFileSize;                    // int32
+        public int m_nPreviewFileSize;             // int32
+        public byte[] m_rgchURL = new byte[256];   // char[256]
+        public int m_unVotesUp;                    // uint32
+        public int m_unVotesDown;                  // uint32
+        public float m_flScore;                    // float
+        public int m_unNumChildren;                // uint32
+
+        public String title() { return bytesToString(m_rgchTitle); }
+        public String description() { return bytesToString(m_rgchDescription); }
+        public String tags() { return bytesToString(m_rgchTags); }
+        public String url() { return bytesToString(m_rgchURL); }
+        public String fileName() { return bytesToString(m_pchFileName); }
+        public boolean tagsTruncated() { return m_bTagsTruncated != 0; }
+    }
+
+    private static String bytesToString(byte[] b) {
+        if (b == null || b.length == 0) return "";
+        int len = 0;
+        for (; len < b.length; len++) {
+            if (b[len] == 0) break;
+        }
+        return len <= 0 ? "" : new String(b, 0, len, StandardCharsets.UTF_8).trim();
+    }
 
     public static boolean UnsubscribeItem(long publishedFileId) {
         if (publishedFileId == 0) return false;
@@ -204,20 +469,27 @@ public final class SteamUGC {
      * {@code SteamUGCDetails_t} struct contents. The caller is responsible for providing a buffer
      * large enough for the current SDK's struct size.
      */
-    private static final boolean DEBUG_GET_QUERY_UGC = true;
-
     public static boolean GetQueryUGCResult(Number handle, int index, byte[] pDetails) {
         if (pDetails == null || pDetails.length == 0) return false;
         Pointer ugc = getUGC();
         if (ugc == null) return false;
         long h = toHandle(handle);
         if (h == 0) return false;
-        if (DEBUG_GET_QUERY_UGC && index <= 4) System.out.println("[ZB SteamUGC] GetQueryUGCResult native call index=" + index + " bufLen=" + pDetails.length);
         Pointer mem = new Memory(pDetails.length);
         boolean ok = SteamAPI.INSTANCE.SteamAPI_ISteamUGC_GetQueryUGCResult(ugc, h, index, mem);
-        if (DEBUG_GET_QUERY_UGC && index <= 4) System.out.println("[ZB SteamUGC] GetQueryUGCResult native returned index=" + index + " ok=" + ok);
         if (ok) mem.read(0, pDetails, 0, pDetails.length);
-        if (DEBUG_GET_QUERY_UGC && index <= 4) System.out.println("[ZB SteamUGC] GetQueryUGCResult mem.read done index=" + index);
+        return ok;
+    }
+
+    /** Safer overload that fills a correctly-sized SteamUGCDetails struct. */
+    public static boolean GetQueryUGCResult(Number handle, int index, SteamUGCDetails outDetails) {
+        if (outDetails == null) return false;
+        Pointer ugc = getUGC();
+        if (ugc == null) return false;
+        long h = toHandle(handle);
+        if (h == 0) return false;
+        boolean ok = SteamAPI.INSTANCE.SteamAPI_ISteamUGC_GetQueryUGCResult(ugc, h, index, outDetails.getPointer());
+        if (ok) outDetails.read();
         return ok;
     }
 
@@ -384,6 +656,17 @@ public final class SteamUGC {
         if (ugc == null) return false;
         long h = toHandle(handle);
         return h != 0 && SteamAPI.INSTANCE.SteamAPI_ISteamUGC_SetReturnPlaytimeStats(ugc, h, unDays);
+    }
+
+    /**
+     * Allow the query to return cached results. unMaxAgeSeconds &gt; 0 enables cache; 0 disables.
+     * C++: bool SetAllowCachedResponse( UGCQueryHandle_t handle, uint32 unMaxAgeSeconds );
+     */
+    public static boolean SetAllowCachedResponse(Number handle, int unMaxAgeSeconds) {
+        Pointer ugc = getUGC();
+        if (ugc == null) return false;
+        long h = toHandle(handle);
+        return h != 0 && SteamAPI.INSTANCE.SteamAPI_ISteamUGC_SetAllowCachedResponse(ugc, h, unMaxAgeSeconds);
     }
 
     /** GetNumSupportedGameVersions / GetSupportedGameVersionData not present in this SDK. */
