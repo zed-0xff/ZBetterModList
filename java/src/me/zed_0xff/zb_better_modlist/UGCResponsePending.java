@@ -3,21 +3,24 @@ package me.zed_0xff.zb_better_modlist;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import me.zed_0xff.zombie_buddy.Exposer;
+import se.krka.kahlua.vm.JavaFunction;
 import se.krka.kahlua.vm.KahluaTable;
+import se.krka.kahlua.vm.LuaCallFrame;
 import zombie.Lua.LuaManager;
 
 /**
  * Lua-visible object returned from {@link UGCRequest#sendAsync()} while the query is in flight.
  * Call {@link #poll()} each frame; when the worker sees completion it returns an ArrayList of
- * item tables (each with modId, and optionally previewURL, metadata, tags). No release needed.
+ * item tables (each with id, subscribed, subscribe(), and optionally previewURL, metadata, tags). No release needed.
  * Response tables are built on the calling (main/Lua) thread to avoid cross-thread Kahlua access.
  */
 @Exposer.LuaClass
 public final class UGCResponsePending {
 
-    private static final long POLL_MS = 50;
-    private static final long TIMEOUT_MS = 15_000L;
+    private static final long POLL_MS         = 50;
+    private static final long TIMEOUT_MS      = 15_000L;
     private static final int RESULTS_PER_PAGE = 50;
+    private static final int DETAILS_BUF_SIZE = 256*1024;
 
     private volatile long queryHandle;
     private volatile long apiCallHandle;
@@ -78,7 +81,7 @@ public final class UGCResponsePending {
         UGCResponse resp = new UGCResponse(queryHandle, RESULTS_PER_PAGE);
         Long handleObj = Long.valueOf(queryHandle);
         for (int i = 0; i < RESULTS_PER_PAGE; i++) {
-            byte[] detailsBuf = new byte[20_000];
+            byte[] detailsBuf = new byte[DETAILS_BUF_SIZE];
             boolean gotResult = SteamUGC.GetQueryUGCResult(handleObj, i, detailsBuf);
             if (!gotResult) break;
             SteamUGC.DecodedUGCDetails details = SteamUGC.DecodeUGCDetails(detailsBuf);
@@ -89,7 +92,7 @@ public final class UGCResponsePending {
             String tagsStr = details != null ? details.tagsCsv : "";
 
             KahluaTable item = LuaManager.platform.newTable();
-            item.rawset("modId", modId);
+            item.rawset("id", modId);
             String title = details != null ? details.title : "";
             if (title != null && !title.isEmpty()) item.rawset("title", title);
             String description = details != null ? details.description : "";
@@ -115,6 +118,17 @@ public final class UGCResponsePending {
                     if (!tag.isEmpty()) tags.rawset(Double.valueOf(++tagIdx), tag);
                 }
                 if (tagIdx > 0) item.rawset("tags", tags);
+            }
+            if (id != 0) {
+                int itemState = SteamUGC.GetItemState(id);
+                item.rawset("subscribed", Boolean.valueOf((itemState & 1) != 0));
+                final String modIdForSubscribe = modId;
+                item.rawset("subscribe", (JavaFunction) (LuaCallFrame frame, int nArgs) -> {
+                    try {
+                        SteamUGC.SubscribeItem(Long.parseLong(modIdForSubscribe));
+                    } catch (NumberFormatException ignored) {}
+                    return 0;
+                });
             }
             list.add(item);
         }

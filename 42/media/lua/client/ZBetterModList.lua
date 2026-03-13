@@ -163,167 +163,168 @@ local BUTTON_HGT = FONT_HGT_SMALL + 6
 local LABEL_HGT = FONT_HGT_MEDIUM + 6
 local UI_BORDER_SPACING = 10
 
-zbHook({
-    [ModSelector.ModListPanel] = {
-        createChildren = function(orig, self)
-            orig(self)
+if not getActivatedMods():contains("\\ModManager") then
+    zbHook({
+        [ModSelector.ModListPanel] = {
+            createChildren = function(orig, self)
+                orig(self)
 
-            local text_showEnabledMods = getText("UI_modselector_showEnabledMods")
-            self.enabledModsTickbox:setVisible(false)
+                local text_showEnabledMods = getText("UI_modselector_showEnabledMods")
+                self.enabledModsTickbox:setVisible(false)
 
+                local label = ISLabel:new(UI_BORDER_SPACING+1, self.filterCombo:getBottom() + UI_BORDER_SPACING, LABEL_HGT, getText("UI_modselector_filter"), 1.0, 1.0, 1.0, 1.0, UIFont.Medium, true)
+                self.filterPanel:addChild(label)
 
-            local label = ISLabel:new(UI_BORDER_SPACING+1, self.filterCombo:getBottom() + UI_BORDER_SPACING, LABEL_HGT, getText("UI_modselector_filter"), 1.0, 1.0, 1.0, 1.0, UIFont.Medium, true)
-            self.filterPanel:addChild(label)
+                local width = BUTTON_HGT + UI_BORDER_SPACING + getTextManager():MeasureStringX(UIFont.Small, getText("UI_modselector_showEnabledMods"))
+                self.filterCombo2 = ISComboBox:new(label:getRight() + UI_BORDER_SPACING, label.y, width, BUTTON_HGT, self, self.updateView)
+                self.filterCombo2:initialise()
 
-            local width = BUTTON_HGT + UI_BORDER_SPACING + getTextManager():MeasureStringX(UIFont.Small, getText("UI_modselector_showEnabledMods"))
-            self.filterCombo2 = ISComboBox:new(label:getRight() + UI_BORDER_SPACING, label.y, width, BUTTON_HGT, self, self.updateView)
-            self.filterCombo2:initialise()
+                self.filterCombo2:addOption(getText("UI_modselector_showAllMods"))      -- 1
+                self.filterCombo2:addOption(getText("UI_modselector_showEnabledMods"))  -- 2
+                self.filterCombo2:addOption(getText("UI_modselector_showDisabledMods")) -- 3
+                self.filterCombo2:addOption(getText("UI_modselector_showNewMods"))      -- 4
 
-            self.filterCombo2:addOption(getText("UI_modselector_showAllMods"))      -- 1
-            self.filterCombo2:addOption(getText("UI_modselector_showEnabledMods"))  -- 2
-            self.filterCombo2:addOption(getText("UI_modselector_showDisabledMods")) -- 3
-            self.filterCombo2:addOption(getText("UI_modselector_showNewMods"))      -- 4
+                self.filterCombo2.selected = 1
+                self.filterPanel:addChild(self.filterCombo2)
 
-            self.filterCombo2.selected = 1
-            self.filterPanel:addChild(self.filterCombo2)
+                local sortLabel = ISLabel:new(self.filterCombo2:getRight() + UI_BORDER_SPACING * 2, label.y, LABEL_HGT, getText("UI_modselector_sortBy"), 1.0, 1.0, 1.0, 1.0, UIFont.Medium, true)
+                self.filterPanel:addChild(sortLabel)
 
-            local sortLabel = ISLabel:new(self.filterCombo2:getRight() + UI_BORDER_SPACING * 2, label.y, LABEL_HGT, getText("UI_modselector_sortBy"), 1.0, 1.0, 1.0, 1.0, UIFont.Medium, true)
-            self.filterPanel:addChild(sortLabel)
+                local sortWidth = BUTTON_HGT + UI_BORDER_SPACING + getTextManager():MeasureStringX(UIFont.Small, getText("UI_modselector_sortByDate"))
+                self.sortCombo = ISComboBox:new(sortLabel:getRight() + UI_BORDER_SPACING, sortLabel.y, sortWidth, BUTTON_HGT, self, self.updateView)
+                self.sortCombo:initialise()
 
-            local sortWidth = BUTTON_HGT + UI_BORDER_SPACING + getTextManager():MeasureStringX(UIFont.Small, getText("UI_modselector_sortByDate"))
-            self.sortCombo = ISComboBox:new(sortLabel:getRight() + UI_BORDER_SPACING, sortLabel.y, sortWidth, BUTTON_HGT, self, self.updateView)
-            self.sortCombo:initialise()
+                self.sortCombo:addOption(getText("UI_modselector_sortByName"))  -- 1
+                self.sortCombo:addOption(getText("UI_modselector_sortByDate"))  -- 2
 
-            self.sortCombo:addOption(getText("UI_modselector_sortByName"))  -- 1
-            self.sortCombo:addOption(getText("UI_modselector_sortByDate"))  -- 2
+                self.sortCombo.selected = readSortOrder()
+                self.filterPanel:addChild(self.sortCombo)
+            end,
 
-            self.sortCombo.selected = readSortOrder()
-            self.filterPanel:addChild(self.sortCombo)
-        end,
+            applyFilters = function(orig, self)
+                orig(self)
 
-        applyFilters = function(orig, self)
-            orig(self)
+                -- Query workshop details for date sorting (once)
+                queryWorkshopDetails(self)
 
-            -- Query workshop details for date sorting (once)
-            queryWorkshopDetails(self)
-
-            -- Filter
-            if self.filterCombo2.selected == 1 then
-                if ZBetterModList.known_mods_after == nil then
-                    ZBetterModList.known_mods_after = {}
+                -- Filter
+                if self.filterCombo2.selected == 1 then
+                    if ZBetterModList.known_mods_after == nil then
+                        ZBetterModList.known_mods_after = {}
+                        for _, modData in pairs(self.model.currentMods) do
+                            ZBetterModList.known_mods_after[modData.modInfo:getId()] = true
+                        end
+                        writeKnownList(ZBetterModList.known_mods_after)
+                    end
+                else
+                    local newTbl = {}
                     for _, modData in pairs(self.model.currentMods) do
-                        ZBetterModList.known_mods_after[modData.modInfo:getId()] = true
-                    end
-                    writeKnownList(ZBetterModList.known_mods_after)
-                end
-            else
-                local newTbl = {}
-                for _, modData in pairs(self.model.currentMods) do
-                    if self.filterCombo2.selected == 2 then
-                        if modData.isActive then
-                            table.insert(newTbl, modData)
-                        end
-                    elseif self.filterCombo2.selected == 3 then
-                        if not modData.isActive then
-                            table.insert(newTbl, modData)
-                        end
-                    elseif self.filterCombo2.selected == 4 then
-                        if not ZBetterModList.known_mods_before[modData.modInfo:getId()] then
-                            table.insert(newTbl, modData)
+                        if self.filterCombo2.selected == 2 then
+                            if modData.isActive then
+                                table.insert(newTbl, modData)
+                            end
+                        elseif self.filterCombo2.selected == 3 then
+                            if not modData.isActive then
+                                table.insert(newTbl, modData)
+                            end
+                        elseif self.filterCombo2.selected == 4 then
+                            if not ZBetterModList.known_mods_before[modData.modInfo:getId()] then
+                                table.insert(newTbl, modData)
+                            end
                         end
                     end
+                    self.model.currentMods = newTbl
                 end
-                self.model.currentMods = newTbl
-            end
 
-            -- Sort (persist selection)
-            writeSortOrder(self.sortCombo.selected)
-            if self.sortCombo.selected == 2 then
-                table.sort(self.model.currentMods, function(a, b)
-                    return getModTimeUpdated(a.modInfo) > getModTimeUpdated(b.modInfo)
-                end)
-            else
-                table.sort(self.model.currentMods, function(a, b)
-                    return a.modInfo:getName():lower() < b.modInfo:getName():lower()
-                end)
-            end
-        end,
-    },
+                -- Sort (persist selection)
+                writeSortOrder(self.sortCombo.selected)
+                if self.sortCombo.selected == 2 then
+                    table.sort(self.model.currentMods, function(a, b)
+                        return getModTimeUpdated(a.modInfo) > getModTimeUpdated(b.modInfo)
+                    end)
+                else
+                    table.sort(self.model.currentMods, function(a, b)
+                        return a.modInfo:getName():lower() < b.modInfo:getName():lower()
+                    end)
+                end
+            end,
+        },
 
-    [ModSelector.ModListBox] = {
-        doDrawItem = function(orig, self, y, item, ...)
-            local nextY = orig(self, y, item, ...)
+        [ModSelector.ModListBox] = {
+            doDrawItem = function(orig, self, y, item, ...)
+                local nextY = orig(self, y, item, ...)
 
-            local timeUpdated = getModTimeUpdated(item.item.modInfo)
-            if timeUpdated > 0 then
-                local ageText = formatAge(timeUpdated)
-                if ageText ~= "" then
-                    local ageWidth = getTextManager():MeasureStringX(UIFont.Small, ageText)
-                    local starX = self:getWidth() - UI_BORDER_SPACING - BUTTON_HGT - 1
-                    local height = nextY - y
-                    local itemPadY = (height - FONT_HGT_SMALL) / 2
-                    local diff = os.time() - timeUpdated
-                    local r, g, b = 0.6, 0.6, 0.6
-                    if diff < 86400 * 2 then
-                        r, g, b = 0.4, 0.85, 0.4
-                    elseif diff > 86400 * 180 then
-                        r, g, b = 0.7, 0.5, 0.3
+                local timeUpdated = getModTimeUpdated(item.item.modInfo)
+                if timeUpdated > 0 then
+                    local ageText = formatAge(timeUpdated)
+                    if ageText ~= "" then
+                        local ageWidth = getTextManager():MeasureStringX(UIFont.Small, ageText)
+                        local starX = self:getWidth() - UI_BORDER_SPACING - BUTTON_HGT - 1
+                        local height = nextY - y
+                        local itemPadY = (height - FONT_HGT_SMALL) / 2
+                        local diff = os.time() - timeUpdated
+                        local r, g, b = 0.6, 0.6, 0.6
+                        if diff < 86400 * 2 then
+                            r, g, b = 0.4, 0.85, 0.4
+                        elseif diff > 86400 * 180 then
+                            r, g, b = 0.7, 0.5, 0.3
+                        end
+                        self:drawText(ageText, starX - ageWidth - UI_BORDER_SPACING * 2, y + itemPadY, r, g, b, 0.7, UIFont.Small)
                     end
-                    self:drawText(ageText, starX - ageWidth - UI_BORDER_SPACING * 2, y + itemPadY, r, g, b, 0.7, UIFont.Small)
                 end
-            end
 
-            return nextY
-        end,
-    },
-})
+                return nextY
+            end,
+        },
+    }) -- zbHook
+end -- if not ModManager
 
 require "OptionScreens/ModSelector/ModInfoPanelTitle"
 require "OptionScreens/ModSelector/ModInfoPanelInteractionParam"
 
 --- Inline comma-separated display for Dependencies / Incompatible panels
 
-local COMMA_WIDTH = getTextManager():MeasureStringX(UIFont.Small, ", ")
-
-function ModInfoPanel.InteractionParam:render()
-    self:drawRectBorder(0, 0, self.borderX, self.height, self.borderColor.a, self.borderColor.r, self.borderColor.g, self.borderColor.b)
-    self:drawText(self.name, self.borderX - UI_BORDER_SPACING - self.labelWidth, (BUTTON_HGT - FONT_HGT_SMALL) / 2, 0.9, 0.9, 0.9, 0.9, UIFont.Small)
-
-    local x = self.borderX + self.padX
-    local y = 2
-    for index, val in ipairs(self.modDict) do
-        if index > 1 then
-            self:drawText(", ", x, y, 0.6, 0.6, 0.6, 0.9, UIFont.Small)
-            x = x + COMMA_WIDTH
-        end
-        self:drawText(val.id, x, y, val.color.r, val.color.g, val.color.b, 0.9, UIFont.Small)
-        local hovered = self:isMouseOver() and self:getMouseX() > x and self:getMouseX() < x + val.len
-                and self:getMouseY() > y and self:getMouseY() < y + FONT_HGT_SMALL + 1
-        if not hovered then
-            self:drawRectBorder(x, y + FONT_HGT_SMALL, val.len, 1, 0.9, val.color.r, val.color.g, val.color.b)
-        elseif self.pressed then
-            if val.available then
-                self.parent:setModInfo(val.modInfo)
-            else
-                local t = luautils.split(val.id, "\\")
-                if t[1] ~= "" then
-                    activateSteamOverlayToWorkshopItem(t[1])
-                end
-            end
-        end
-        x = x + val.len
-    end
-    self.pressed = false
-end
-
-zbHook({
-    [ModInfoPanel.InteractionParam] = {
-        setModInfo = function(orig, self, ...)
-            orig(self, ...)
-            self:setHeight(BUTTON_HGT)
-        end
-    }
-})
+--local COMMA_WIDTH = getTextManager():MeasureStringX(UIFont.Small, ", ")
+--
+--function ModInfoPanel.InteractionParam:render()
+--    self:drawRectBorder(0, 0, self.borderX, self.height, self.borderColor.a, self.borderColor.r, self.borderColor.g, self.borderColor.b)
+--    self:drawText(self.name, self.borderX - UI_BORDER_SPACING - self.labelWidth, (BUTTON_HGT - FONT_HGT_SMALL) / 2, 0.9, 0.9, 0.9, 0.9, UIFont.Small)
+--
+--    local x = self.borderX + self.padX
+--    local y = 2
+--    for index, val in ipairs(self.modDict) do
+--        if index > 1 then
+--            self:drawText(", ", x, y, 0.6, 0.6, 0.6, 0.9, UIFont.Small)
+--            x = x + COMMA_WIDTH
+--        end
+--        self:drawText(val.id, x, y, val.color.r, val.color.g, val.color.b, 0.9, UIFont.Small)
+--        local hovered = self:isMouseOver() and self:getMouseX() > x and self:getMouseX() < x + val.len
+--                and self:getMouseY() > y and self:getMouseY() < y + FONT_HGT_SMALL + 1
+--        if not hovered then
+--            self:drawRectBorder(x, y + FONT_HGT_SMALL, val.len, 1, 0.9, val.color.r, val.color.g, val.color.b)
+--        elseif self.pressed then
+--            if val.available then
+--                self.parent:setModInfo(val.modInfo)
+--            else
+--                local t = luautils.split(val.id, "\\")
+--                if t[1] ~= "" then
+--                    activateSteamOverlayToWorkshopItem(t[1])
+--                end
+--            end
+--        end
+--        x = x + val.len
+--    end
+--    self.pressed = false
+--end
+--
+--zbHook({
+--    [ModInfoPanel.InteractionParam] = {
+--        setModInfo = function(orig, self, ...)
+--            orig(self, ...)
+--            self:setHeight(BUTTON_HGT)
+--        end
+--    }
+--})
 
 ---
 
@@ -360,11 +361,11 @@ end
 
 local function onUnsubscribeBtn(panel)
     local workshopID = panel.workshopID
-    if not workshopID or not ModListHelper then return end
+    if not workshopID or not SteamLuaHelper then return end
     if isAnyModInPackageEnabled(workshopID, panel.modInfo) then
         return
     end
-    local ok = ModListHelper.unsubscribeFromWorkshopItem(workshopID)
+    local ok = SteamLuaHelper.unsubscribeFromWorkshopItem(workshopID)
     if not ok then return end
 
     _unsubscribed = true
@@ -417,19 +418,19 @@ zbHook({
 
 --- Fix incompatible panel height after vanilla overrides it
 
-zbHook({
-    ModInfoPanel = {
-        updateView = function(orig, self, ...)
-            orig(self, ...)
-            self.incompatiblePanel:setHeight(BUTTON_HGT)
-        end,
-
-        recalcSize = function(orig, self, ...)
-            orig(self, ...)
-            self.incompatiblePanel:setHeight(BUTTON_HGT)
-        end,
-    }
-})
+--zbHook({
+--    ModInfoPanel = {
+--        updateView = function(orig, self, ...)
+--            orig(self, ...)
+--            self.incompatiblePanel:setHeight(BUTTON_HGT)
+--        end,
+--
+--        recalcSize = function(orig, self, ...)
+--            orig(self, ...)
+--            self.incompatiblePanel:setHeight(BUTTON_HGT)
+--        end,
+--    }
+--})
 
 --- Tab panel with Info + Files tabs (following MainOptions pattern)
 

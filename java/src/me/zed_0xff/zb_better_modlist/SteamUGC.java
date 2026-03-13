@@ -13,6 +13,13 @@ import me.zed_0xff.zombie_buddy.Exposer;
  * Pure mirror of Steamworks ISteamUGC API. JNA bindings only; method names and behaviour
  * match the C#/C API. For Lua-facing helpers (e.g. decoded UGC query result), use
  * {@link SteamLuaHelper}.
+ * <p>
+ * Signatures validated against ext/source-sdk-2013/src/public/steam/steam_api.json (ISteamUGC):
+ * CreateQueryAllUGCRequestPage(eQueryType, eMatchingUGCType, nCreatorAppID, nConsumerAppID, unPage) -> UGCQueryHandle_t;
+ * SendQueryUGCRequest(handle) -> SteamAPICall_t;
+ * GetQueryUGCResult(handle, index, pDetails) -> bool;
+ * SetReturnLongDescription(handle, bReturnLongDescription) -> bool;
+ * SetAllowCachedResponse(handle, unMaxAgeSeconds) -> bool.
  */
 @Exposer.LuaClass
 public final class SteamUGC {
@@ -32,6 +39,7 @@ public final class SteamUGC {
         int SteamAPI_GetHSteamUser();
         int SteamAPI_GetHSteamPipe();
         Pointer SteamAPI_SteamUGC_v021(int hSteamUser, int hSteamPipe);
+        long SteamAPI_ISteamUGC_SubscribeItem(Pointer self, long publishedFileId);
         long SteamAPI_ISteamUGC_UnsubscribeItem(Pointer self, long publishedFileId);
         long SteamAPI_ISteamUGC_CreateQueryAllUGCRequestPage(Pointer self, int eQueryType, int eMatchingUGCType, int nCreatorAppID, int nConsumerAppID, int unPage);
         int SteamAPI_ISteamUGC_GetNumSubscribedItems(Pointer self, boolean bIncludeLocallyDisabled);
@@ -70,6 +78,7 @@ public final class SteamUGC {
         boolean SteamAPI_ISteamUGC_SetRankedByTrendDays(Pointer self, long handle, int unDays);
         boolean SteamAPI_ISteamUGC_SetReturnPlaytimeStats(Pointer self, long handle, int unDays);
         boolean SteamAPI_ISteamUGC_SetAllowCachedResponse(Pointer self, long handle, int unMaxAgeSeconds);
+        boolean SteamAPI_ISteamUGC_AddRequiredTag(Pointer self, long handle, String pTagName);
     }
 
     private static volatile Pointer steamUGC;
@@ -343,6 +352,17 @@ public final class SteamUGC {
         return len <= 0 ? "" : new String(b, 0, len, StandardCharsets.UTF_8).trim();
     }
 
+    /**
+     * Subscribe to a workshop item. Async: returns SteamAPICall_t; use SteamUtils.IsAPICallCompleted
+     * and GetAPICallResult with callback 1313 (RemoteStorageSubscribePublishedFileResult_t) for result.
+     */
+    public static long SubscribeItem(long publishedFileId) {
+        if (publishedFileId == 0) return 0;
+        Pointer ugc = getUGC();
+        if (ugc == null) return 0;
+        return SteamAPI.INSTANCE.SteamAPI_ISteamUGC_SubscribeItem(ugc, publishedFileId);
+    }
+
     public static boolean UnsubscribeItem(long publishedFileId) {
         if (publishedFileId == 0) return false;
         Pointer ugc = getUGC();
@@ -361,6 +381,14 @@ public final class SteamUGC {
         if (ugc == null) return false;
         long h = toHandle(handle);
         return h != 0 && SteamAPI.INSTANCE.SteamAPI_ISteamUGC_SetSearchText(ugc, h, searchText != null ? searchText : "");
+    }
+
+    /** Add a required tag to the query; items must have this tag. */
+    public static boolean AddRequiredTag(Number handle, String tagName) {
+        Pointer ugc = getUGC();
+        if (ugc == null) return false;
+        long h = toHandle(handle);
+        return h != 0 && SteamAPI.INSTANCE.SteamAPI_ISteamUGC_AddRequiredTag(ugc, h, tagName != null ? tagName : "");
     }
 
     public static boolean SetReturnAdditionalPreviews(Number handle, boolean value) {
@@ -659,10 +687,12 @@ public final class SteamUGC {
     }
 
     /**
-     * Allow the query to return cached results. unMaxAgeSeconds &gt; 0 enables cache; 0 disables.
-     * C++: bool SetAllowCachedResponse( UGCQueryHandle_t handle, uint32 unMaxAgeSeconds );
+     * Allow the query to return cached results. unMaxAgeSeconds &gt; 0 enables cache.
+     * Validated: steam_api.json SetAllowCachedResponse(handle, unMaxAgeSeconds uint32).
+     * No-op when unMaxAgeSeconds <= 0 to avoid native crash on some Steam client builds.
      */
     public static boolean SetAllowCachedResponse(Number handle, int unMaxAgeSeconds) {
+        if (unMaxAgeSeconds <= 0) return true;
         Pointer ugc = getUGC();
         if (ugc == null) return false;
         long h = toHandle(handle);

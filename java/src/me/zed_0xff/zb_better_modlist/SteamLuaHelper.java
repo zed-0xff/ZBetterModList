@@ -21,6 +21,20 @@ public final class SteamLuaHelper {
     private SteamLuaHelper() {}
 
     /**
+     * Subscribe to a Steam Workshop item by its workshop ID (e.g. "1234567890").
+     * Sends the request to Steam; the subscription completes asynchronously.
+     *
+     * @param workshopId Workshop published file ID as string.
+     * @return true if the subscribe request was sent, false if Steam unavailable or invalid ID.
+     */
+    public static boolean subscribeToWorkshopItem(String workshopId) {
+        if (workshopId == null || workshopId.isEmpty()) return false;
+        if (!zombie.core.znet.SteamUtils.isValidSteamID(workshopId)) return false;
+        long id = zombie.core.znet.SteamUtils.convertStringToSteamID(workshopId);
+        return SteamUGC.SubscribeItem(id) != 0;
+    }
+
+    /**
      * Unsubscribe from a Steam Workshop mod by its workshop ID (e.g. "1234567890").
      * Sends the request to Steam; the item is removed after the game quits.
      *

@@ -9,7 +9,7 @@ import se.krka.kahlua.vm.KahluaTable;
 
 /**
  * Lua-visible object that encapsulates UGCQueryHandle_t. Create via {@link #Create(Number, Number, Number)},
- * configure with setSearchText / setReturn* / setMatchAnyTag / setRankedByTrendDays / setAllowCachedResponse, then call {@link #send()} or {@link #sendAsync()}.
+ * configure with setSearchText / addRequiredTag / setReturn* / setMatchAnyTag / setRankedByTrendDays / setAllowCachedResponse, then call {@link #send()} or {@link #sendAsync()}.
  */
 @Exposer.LuaClass
 public final class UGCRequest {
@@ -27,6 +27,11 @@ public final class UGCRequest {
 
     public UGCRequest setSearchText(String searchText) {
         if (handle != 0) SteamUGC.SetSearchText(handle, searchText != null ? searchText : "");
+        return this;
+    }
+
+    public UGCRequest addRequiredTag(String tagName) {
+        if (handle != 0) SteamUGC.AddRequiredTag(handle, tagName);
         return this;
     }
 
