@@ -25,7 +25,7 @@ ZBetterModList = ZBetterModList or {
 local _unsubscribed = false
 
 -- Override getModDirectoryTable so unsubscribed workshop mod paths are removed from the list.
-zbHook({
+zdk.hook({
     ActiveMods = {
         -- force reset lua after any workshop unsubscription
         requiresResetLua = function(orig, ...)
@@ -166,7 +166,7 @@ local UI_BORDER_SPACING = 10
 local hasModManager = getActivatedMods():contains("ModManager") or getActivatedMods():contains("\\ModManager")
 
 if not hasModManager then
-    zbHook({
+    zdk.hook({
         [ModSelector.ModListPanel] = {
             createChildren = function(orig, self)
                 orig(self)
@@ -282,7 +282,7 @@ if not hasModManager then
                 return nextY
             end,
         },
-    }) -- zbHook
+    }) -- zdk.hook
 end -- if not ModManager
 
 require "OptionScreens/ModSelector/ModInfoPanelTitle"
@@ -323,7 +323,7 @@ require "OptionScreens/ModSelector/ModInfoPanelInteractionParam"
 --    self.pressed = false
 --end
 --
---zbHook({
+--zdk.hook({
 --    [ModInfoPanel.InteractionParam] = {
 --        setModInfo = function(orig, self, ...)
 --            orig(self, ...)
@@ -382,7 +382,7 @@ local function onUnsubscribeBtn(panel)
     end
 end
 
-zbHook({
+zdk.hook({
     [ModInfoPanel.Title] = {
         createChildren = function(orig, self)
             orig(self)
@@ -424,7 +424,7 @@ zbHook({
 
 --- Fix incompatible panel height after vanilla overrides it
 
---zbHook({
+--zdk.hook({
 --    ModInfoPanel = {
 --        updateView = function(orig, self, ...)
 --            orig(self, ...)
@@ -442,7 +442,7 @@ zbHook({
 
 require "OptionScreens/ModSelector/ModSelector"
 
-zbHook({
+zdk.hook({
     ModSelector = {
         create = function(orig, self)
             orig(self)
@@ -526,4 +526,4 @@ zbHook({
             end
         end -- create
     } -- ModSelector
-}) -- zbHook
+}) -- zdk.hook
