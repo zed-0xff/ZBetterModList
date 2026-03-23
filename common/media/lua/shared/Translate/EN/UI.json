@@ -1,0 +1,11 @@
+{
+    "UI_modselector_showAllMods": "Show all mods",
+    "UI_modselector_showDisabledMods": "Show disabled mods",
+    "UI_modselector_showNewMods": "Show new mods",
+    "UI_modselector_sortBy": "Sort",
+    "UI_modselector_sortByName": "By name",
+    "UI_modselector_sortByDate": "By date",
+    "UI_modselector_openWorkshopPage": "Open Workshop page",
+    "UI_modselector_tabInfo": "Info",
+    "UI_modselector_tabFiles": "Files"
+}

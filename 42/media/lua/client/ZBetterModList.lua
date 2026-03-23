@@ -163,11 +163,15 @@ local BUTTON_HGT = FONT_HGT_SMALL + 6
 local LABEL_HGT = FONT_HGT_MEDIUM + 6
 local UI_BORDER_SPACING = 10
 
-if not getActivatedMods():contains("\\ModManager") then
+local hasModManager = getActivatedMods():contains("ModManager") or getActivatedMods():contains("\\ModManager")
+
+if not hasModManager then
     zbHook({
         [ModSelector.ModListPanel] = {
             createChildren = function(orig, self)
                 orig(self)
+
+                if not self.enabledModsTickbox or not self.filterPanel then return end
 
                 local text_showEnabledMods = getText("UI_modselector_showEnabledMods")
                 self.enabledModsTickbox:setVisible(false)
@@ -203,6 +207,8 @@ if not getActivatedMods():contains("\\ModManager") then
 
             applyFilters = function(orig, self)
                 orig(self)
+
+                if not self.filterCombo2 then return end
 
                 -- Query workshop details for date sorting (once)
                 queryWorkshopDetails(self)
