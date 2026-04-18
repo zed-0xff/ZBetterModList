@@ -448,7 +448,36 @@ zdk.hook({
             if self.type == "javaJarFile" then
                 local val = self.modInfo and getRawModInfo(mod_id).javajarfile
                 if val then
-                    self:drawText(val, self.borderX + UI_BORDER_SPACING, 2, color.r, color.g, color.b, color.a, UIFont.Small)
+                    local font = UIFont.Small
+                    local tm = getTextManager()
+                    local x = self.borderX + UI_BORDER_SPACING
+                    local y = 2
+
+                    self:drawText(val, x, y, color.r, color.g, color.b, color.a, font)
+                    x = x + tm:MeasureStringX(font, val)
+
+                    local status = ZombieBuddy and ZombieBuddy.getJavaModStatus and ZombieBuddy.getJavaModStatus(mod_id)
+                    if status then
+                        local def  = { r = 0.9, g = 0.9, b = 0.9, a = 0.9 }
+                        local g    = getCore():getGoodHighlitedColor()
+                        local good = { r = g:getR(), g = g:getG(), b = g:getB(), a = 0.9 }
+                        local b    = getCore():getBadHighlitedColor()
+                        local bad  = { r = b:getR(), g = b:getG(), b = b:getB(), a = 0.9 }
+
+                        local function seg(t, c)
+                            self:drawText(t, x, y, c.r, c.g, c.b, c.a, font)
+                            x = x + tm:MeasureStringX(font, t)
+                        end
+
+                        seg("   ", def)
+                        if status.loaded then seg("loaded", good) else seg("blocked", bad) end
+                        if status.decision then
+                            seg(", ", def)
+                            if status.decision == "yes" then seg("allow", good) else seg("deny", bad) end
+                            seg(", ", def)
+                            seg(status.persisted and "persisted" or "session", def)
+                        end
+                    end
                 end
             elseif self.type == "javaPkgName" then
                 local val = self.modInfo and getRawModInfo(mod_id).javapkgname
