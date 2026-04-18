@@ -1,0 +1,44 @@
+Adds filters, sorting, and in-game Steam Workshop actions to the vanilla Mod Selector screen.
+
+[b]What it adds:[/b]
+Extends Project Zomboid's existing mod list with quality-of-life features - nothing is replaced.
+[list]
+[*] Filter by: [b]All[/b] / [b]Enabled[/b] / [b]Disabled[/b] / [b]Java[/b] / [b]New[/b]
+[*] Sort by: [b]Name[/b] or [b]Date[/b]
+[*] Unsubscribe Workshop mods directly from the in-game list
+[*] Workshop mods you unsubscribed this session are hidden without restarting the game
+[*] Shows each Java mod's load status next to its JAR path - [b]loaded[/b] / [b]blocked[/b], [b]allow[/b] / [b]deny[/b], [b]persisted[/b] / [b]session[/b] - color-coded (green = good, red = bad) so you can see at a glance which JARs ZombieBuddy let through
+[/list]
+
+[h1]Installation[/h1]
+[list]
+[*] Subscribe to [b]ZombieBuddy[/b] and follow its one-time setup (required).
+[*] Subscribe to [b]zdk[/b] (required).
+[*] Subscribe to [b]ZBetterModList[/b].
+[*] Enable all three in the mod list and launch the game.
+[/list]
+
+[h1]Requirements[/h1]
+[list]
+[*] [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3619862853]ZombieBuddy[/url] (Java agent framework)
+[*] [b]zdk[/b] (Zomboid Development Kit)
+[/list]
+
+[h1]FAQ[/h1]
+[list]
+    [*][b]Does it work on multiplayer?[/b]
+    Yes - it only affects the client-side mod selector UI.
+
+    [*][b]Save compatibility?[/b]
+    Safe to add or remove on existing saves.
+
+    [*][b]Supported game versions?[/b]
+    B42.12+
+[/list]
+
+[h1]Links[/h1]
+[url=https://github.com/zed-0xff/ZBetterModList]GitHub Repository[/url]
+
+[h1]Support the Project[/h1]
+If you find this mod useful, consider supporting development:
+[url=https://ko-fi.com/zed_0xff][img]https://i.imgur.com/Utx6OIH.png[/img][/url]
