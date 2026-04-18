@@ -1,6 +1,9 @@
 require "OptionScreens/ModSelector/ModListPanel"
 require "OptionScreens/ModSelector/ModListBox"
 
+local SHOW_MOD_OPTIONS = { "All", "Enabled", "Disabled", "Java", "New" }
+local SORT_OPTIONS     = { "Name", "Date" }
+
 -- Steam UGC query constants (global)
 PZ_APP_ID = 108600
 k_EUGCQuery_RankedByVote = 0
@@ -56,6 +59,43 @@ zdk.hook({
         end
     }
 })
+
+-- parse "mod.info" file
+-- returns a table of key-value pairs (keys are lowercased). Returns nil if no mod.info or error.
+local function parseModInfo(mod_id)
+    local reader = getModFileReader(mod_id, "mod.info", false)
+    if not reader then return end
+
+    local info = {}
+    local line = reader:readLine()
+    while line ~= nil do
+        line = line:trim():gsub("\t", " ")
+        local eq_pos = line:find("=")
+        if eq_pos then
+            local key   = line:sub(0, eq_pos - 1):trim():lower()
+            local value = line:sub(eq_pos + 1):trim()
+            info[key] = value
+        end
+
+        line = reader:readLine()
+    end
+    reader:close()
+    return info
+end
+
+local _mod_info_cache = {}
+local function getRawModInfo(mod_id)
+    local cached = _mod_info_cache[mod_id]
+    if not cached then
+        cached = parseModInfo(mod_id)
+        _mod_info_cache[mod_id] = cached
+    end
+    return cached or {}
+end
+
+local function isJavaMod(modInfo)
+    return (getRawModInfo(modInfo:getId()).javajarfile ~= nil)
+end
 
 local function readKnownList()
     local result = {}
@@ -157,10 +197,10 @@ end
 
 ---
 
-local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
-local BUTTON_HGT = FONT_HGT_SMALL + 6
-local LABEL_HGT = FONT_HGT_MEDIUM + 6
+local FONT_HGT_SMALL    = getTextManager():getFontHeight(UIFont.Small)
+local FONT_HGT_MEDIUM   = getTextManager():getFontHeight(UIFont.Medium)
+local BUTTON_HGT        = FONT_HGT_SMALL + 6
+local LABEL_HGT         = FONT_HGT_MEDIUM + 6
 local UI_BORDER_SPACING = 10
 
 local hasModManager = getActivatedMods():contains("ModManager") or getActivatedMods():contains("\\ModManager")
@@ -173,33 +213,31 @@ if not hasModManager then
 
                 if not self.enabledModsTickbox or not self.filterPanel then return end
 
-                local text_showEnabledMods = getText("UI_modselector_showEnabledMods")
                 self.enabledModsTickbox:setVisible(false)
 
-                local label = ISLabel:new(UI_BORDER_SPACING+1, self.filterCombo:getBottom() + UI_BORDER_SPACING, LABEL_HGT, getText("UI_modselector_filter"), 1.0, 1.0, 1.0, 1.0, UIFont.Medium, true)
+                local label = ISLabel:new(UI_BORDER_SPACING+1, self.filterCombo:getBottom() + UI_BORDER_SPACING, LABEL_HGT, getText("UI_modselector_show"), 1.0, 1.0, 1.0, 1.0, UIFont.Medium, true)
                 self.filterPanel:addChild(label)
 
-                local width = BUTTON_HGT + UI_BORDER_SPACING + getTextManager():MeasureStringX(UIFont.Small, getText("UI_modselector_showEnabledMods"))
-                self.filterCombo2 = ISComboBox:new(label:getRight() + UI_BORDER_SPACING, label.y, width, BUTTON_HGT, self, self.updateView)
-                self.filterCombo2:initialise()
+                self.showCombo = ISComboBox:new(self.filterCombo:getX(), label.y, self.filterCombo:getWidth(), BUTTON_HGT, self, self.updateView)
+                self.showCombo:initialise()
 
-                self.filterCombo2:addOption(getText("UI_modselector_showAllMods"))      -- 1
-                self.filterCombo2:addOption(getText("UI_modselector_showEnabledMods"))  -- 2
-                self.filterCombo2:addOption(getText("UI_modselector_showDisabledMods")) -- 3
-                self.filterCombo2:addOption(getText("UI_modselector_showNewMods"))      -- 4
+                for _, option in ipairs(SHOW_MOD_OPTIONS) do
+                    self.showCombo:addOption(getText("UI_modselector_show" .. option))
+                end
 
-                self.filterCombo2.selected = 1
-                self.filterPanel:addChild(self.filterCombo2)
+                self.showCombo.selected = 1
+                self.filterPanel:addChild(self.showCombo)
 
-                local sortLabel = ISLabel:new(self.filterCombo2:getRight() + UI_BORDER_SPACING * 2, label.y, LABEL_HGT, getText("UI_modselector_sortBy"), 1.0, 1.0, 1.0, 1.0, UIFont.Medium, true)
+                local sortLabel = ISLabel:new(self.showCombo:getRight() + UI_BORDER_SPACING * 2, label.y, LABEL_HGT, getText("UI_modselector_sortBy"), 1.0, 1.0, 1.0, 1.0, UIFont.Medium, true)
                 self.filterPanel:addChild(sortLabel)
 
                 local sortWidth = BUTTON_HGT + UI_BORDER_SPACING + getTextManager():MeasureStringX(UIFont.Small, getText("UI_modselector_sortByDate"))
                 self.sortCombo = ISComboBox:new(sortLabel:getRight() + UI_BORDER_SPACING, sortLabel.y, sortWidth, BUTTON_HGT, self, self.updateView)
                 self.sortCombo:initialise()
 
-                self.sortCombo:addOption(getText("UI_modselector_sortByName"))  -- 1
-                self.sortCombo:addOption(getText("UI_modselector_sortByDate"))  -- 2
+                for _, option in ipairs(SORT_OPTIONS) do
+                    self.sortCombo:addOption(getText("UI_modselector_sortBy" .. option))
+                end
 
                 self.sortCombo.selected = readSortOrder()
                 self.filterPanel:addChild(self.sortCombo)
@@ -208,13 +246,14 @@ if not hasModManager then
             applyFilters = function(orig, self)
                 orig(self)
 
-                if not self.filterCombo2 then return end
+                if not self.showCombo then return end
 
                 -- Query workshop details for date sorting (once)
                 queryWorkshopDetails(self)
 
                 -- Filter
-                if self.filterCombo2.selected == 1 then
+                local showMode = SHOW_MOD_OPTIONS[self.showCombo.selected]
+                if showMode == "All" then
                     if ZBetterModList.known_mods_after == nil then
                         ZBetterModList.known_mods_after = {}
                         for _, modData in pairs(self.model.currentMods) do
@@ -225,15 +264,19 @@ if not hasModManager then
                 else
                     local newTbl = {}
                     for _, modData in pairs(self.model.currentMods) do
-                        if self.filterCombo2.selected == 2 then
+                        if showMode == "Enabled" then
                             if modData.isActive then
                                 table.insert(newTbl, modData)
                             end
-                        elseif self.filterCombo2.selected == 3 then
+                        elseif showMode == "Disabled" then
                             if not modData.isActive then
                                 table.insert(newTbl, modData)
                             end
-                        elseif self.filterCombo2.selected == 4 then
+                        elseif showMode == "Java" then
+                            if isJavaMod(modData.modInfo) then
+                                table.insert(newTbl, modData)
+                            end
+                        elseif showMode == "New" then
                             if not ZBetterModList.known_mods_before[modData.modInfo:getId()] then
                                 table.insert(newTbl, modData)
                             end
@@ -244,7 +287,8 @@ if not hasModManager then
 
                 -- Sort (persist selection)
                 writeSortOrder(self.sortCombo.selected)
-                if self.sortCombo.selected == 2 then
+                local sortMode = SORT_OPTIONS[self.sortCombo.selected]
+                if sortMode == "Date" then
                     table.sort(self.model.currentMods, function(a, b)
                         return getModTimeUpdated(a.modInfo) > getModTimeUpdated(b.modInfo)
                     end)
@@ -286,7 +330,7 @@ if not hasModManager then
 end -- if not ModManager
 
 require "OptionScreens/ModSelector/ModInfoPanelTitle"
-require "OptionScreens/ModSelector/ModInfoPanelInteractionParam"
+--require "OptionScreens/ModSelector/ModInfoPanelInteractionParam"
 
 --- Inline comma-separated display for Dependencies / Incompatible panels
 
@@ -383,7 +427,39 @@ local function onUnsubscribeBtn(panel)
 end
 
 zdk.hook({
+    ModInfoPanel = {
+        -- add javaJarFile and javaPkgName to modInfoParams for title panel
+        new = function(orig, self, ...)
+            local o = orig(self, ...)
+            if type(o.modInfoParams) == "table" then
+                table.insert(o.modInfoParams, "javaJarFile")
+                table.insert(o.modInfoParams, "javaPkgName")
+            end
+            return o
+        end,
+    },
+    [ModInfoPanel.Param] = {
+        -- render values of javaJarFile and javaPkgName modInfoParams
+        render = function(orig, self, ...)
+            orig(self, ...)
+
+            local color = { r = 0.9, g = 0.4, b = 0.9, a = 0.9 }
+            local mod_id = self.modInfo:getId()
+            if self.type == "javaJarFile" then
+                local val = self.modInfo and getRawModInfo(mod_id).javajarfile
+                if val then
+                    self:drawText(val, self.borderX + UI_BORDER_SPACING, 2, color.r, color.g, color.b, color.a, UIFont.Small)
+                end
+            elseif self.type == "javaPkgName" then
+                local val = self.modInfo and getRawModInfo(mod_id).javapkgname
+                if val then
+                    self:drawText(val, self.borderX + UI_BORDER_SPACING, 2, color.r, color.g, color.b, color.a, UIFont.Small)
+                end
+            end
+        end,
+    },
     [ModInfoPanel.Title] = {
+        -- add 'unsubscribe' and 'workshop page' buttons to title panel
         createChildren = function(orig, self)
             orig(self)
 
@@ -403,6 +479,7 @@ zdk.hook({
             self:addChild(self.workshopBtn)
         end,
 
+        -- set visibility and enabled state of workshop/unsubscribe buttons
         setModInfo = function(orig, self, modInfo)
             orig(self, modInfo)
 
