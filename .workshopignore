@@ -1,6 +1,7 @@
 # see https://github.com/zed-0xff/ZBetterWorkshopUpload
 
 *.class
+*.kra
 *.xcf
 
 build
