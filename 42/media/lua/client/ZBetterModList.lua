@@ -22,6 +22,7 @@ local PZ_ID  = 108600
 ZBetterModList = ZBetterModList or {}
 ZBetterModList.known_mods_before = ZBetterModList.known_mods_before
 ZBetterModList.known_mods_after  = ZBetterModList.known_mods_after
+ZBetterModList.known_sids = {} -- known steam ids
 -- Workshop IDs to hide from getModDirectoryTable (unsubscribed this session). Paths containing "/108600/<id>/mods/" are excluded.
 ZBetterModList.hideWorkshopIds   = ZBetterModList.hideWorkshopIds or {}
 
@@ -199,21 +200,6 @@ local function queryWorkshopDetails(panel)
     local workshopIDs = getSteamWorkshopItemIDs()
     if not workshopIDs or workshopIDs:isEmpty() then return end
 
-    for i=0, workshopIDs:size()-1 do
-        local sid = workshopIDs:get(i)
-        local mods = getSteamWorkshopItemMods(sid)
-        for j=0, mods:size()-1 do
-            local mod = mods:get(j)
-            MID2SID[mod:getId()] = sid
-        end
-    end
-
-    local items = getSteamWorkshopStagedItems()
-    for i=0, items:size()-1 do
-        local item = items:get(i)
-        DIR2SID[item:getContentFolder()] = item:getID()
-    end
-
     querySteamWorkshopItemDetails(workshopIDs, function(panel, status, info)
         if status == "Completed" then
             for i = 1, info:size() do
@@ -244,18 +230,28 @@ local Collections = ZBetterModList.Collections
 -- Reflect selection state on per-collection buttons. Called from both the combo
 -- change handler and any code path that mutates the tracked-collection list.
 local function updateCollectionButtonsEnable(panel)
+    local hasData      = #panel.collectionCombo.options > 1
     local hasSelection = panel.selectedCollectionId ~= nil
+
     if panel.removeCollectionBtn then
         panel.removeCollectionBtn:setEnable(hasSelection)
+        if not hasSelection then
+            panel.removeCollectionBtn.borderColor  = {r=1, g=1, b=1, a=0.2}
+        end
     end
+
     if panel.refreshCollectionBtn then
-        panel.refreshCollectionBtn:setEnable(hasSelection)
+        panel.refreshCollectionBtn:setEnable(hasData)
+        if not hasData then
+            panel.refreshCollectionBtn.borderColor = {r=1, g=1, b=1, a=0.2}
+        end
     end
 end
 
 local function rebuildCollectionCombo(panel)
     local combo = panel and panel.collectionCombo
     if not combo then return end
+
     local prevId = panel.selectedCollectionId
     combo:clear()
     combo:addOptionWithData(getText("UI_modselector_collection_all"), nil)
@@ -278,6 +274,7 @@ local function onAddCollectionPrompt(panel, button)
     -- runs from Collections.poll() once Steam returns the children.
     local id = Collections.addAndSubscribe(input)
     if not id then return end
+
     panel.selectedCollectionId = id
     rebuildCollectionCombo(panel)
     panel:updateView()
@@ -319,10 +316,35 @@ local function onRefreshCollectionBtn(panel)
     rebuildCollectionCombo(panel)
 end
 
+local function updateLists()
+    local workshopIDs = getSteamWorkshopItemIDs()
+    if not workshopIDs or workshopIDs:isEmpty() then return end
+
+    for i=0, workshopIDs:size()-1 do
+        local sid = workshopIDs:get(i)
+        ZBetterModList.known_sids[sid] = true
+
+        local mods = getSteamWorkshopItemMods(sid)
+        for j=0, mods:size()-1 do
+            local mod = mods:get(j)
+            MID2SID[mod:getId()] = sid
+        end
+    end
+
+    local items = getSteamWorkshopStagedItems()
+    for i=0, items:size()-1 do
+        local item = items:get(i)
+        DIR2SID[item:getContentFolder()] = item:getID()
+        ZBetterModList.known_sids[item:getID()] = true
+    end
+end
+
 if not hasModManager then
     zdk.hook({
         [ModSelector.ModListPanel] = {
             createChildren = function(orig, self)
+                updateLists()
+
                 orig(self)
 
                 if not self.enabledModsTickbox or not self.filterPanel then return end
@@ -383,8 +405,6 @@ if not hasModManager then
                 self.filterPanel:addChild(self.refreshCollectionBtn)
 
                 rebuildCollectionCombo(self)
-                -- Refresh tracked collections once per mod-selector open.
-                Collections.refreshAll()
             end,
 
             prerender = function(orig, self)

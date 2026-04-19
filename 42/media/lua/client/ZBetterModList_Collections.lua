@@ -13,9 +13,10 @@ local Collections = {
     ids             = {}, -- ordered list of collection IDs (string)
     byId            = {}, -- id -> { title = "", childIds = { [workshopIdStr] = true }, loaded = bool }
     pending         = {}, -- id -> SteamCollection handle (fetch in flight)
-    subscribeOnLoad = {}, -- id -> true: subscribe to all children once the current fetch completes
 }
 ZBetterModList.Collections = Collections
+
+local logger = zdk.Logger.new(MOD_ID)
 
 -- Extract a Steam Workshop ID from a URL, or return the input unchanged if it
 -- is already a bare numeric ID. Accepts the common shapes:
@@ -43,6 +44,7 @@ local function load()
     Collections.byId = {}
     local reader = getFileReader(STORAGE_FILE, false)
     if not reader then return end
+
     local line = reader:readLine()
     while line do
         line = line:trim()
@@ -82,6 +84,7 @@ end
 local function absorbResult(id, result)
     local entry = Collections.byId[id]
     if not entry then return end
+
     if result then
         local title = result.title
         if title and title ~= "" then entry.title = title end
@@ -115,10 +118,7 @@ function Collections.poll()
         if result then
             Collections.pending[id] = nil
             absorbResult(id, result)
-            if Collections.subscribeOnLoad[id] then
-                Collections.subscribeOnLoad[id] = nil
-                Collections.subscribeAll(id)
-            end
+            Collections.subscribeAll(id)
             anyDone = true
         end
     end
@@ -144,7 +144,6 @@ function Collections.remove(id)
     if not id or not Collections.byId[id] then return false end
     Collections.byId[id] = nil
     Collections.pending[id] = nil
-    Collections.subscribeOnLoad[id] = nil
     for i, v in ipairs(Collections.ids) do
         if v == id then table.remove(Collections.ids, i); break end
     end
@@ -163,6 +162,7 @@ end
 function Collections.displayName(id)
     local entry = Collections.byId[id]
     if not entry then return id end
+
     local pending = Collections.pending[id] ~= nil
     local base
     if entry.title and entry.title ~= "" then
@@ -201,25 +201,21 @@ function Collections.subscribeAll(id)
     if not entry or not entry.loaded then return 0 end
     if not SteamLuaHelper or not SteamLuaHelper.subscribeToWorkshopItem then return 0 end
     local n = 0
-    for cid in pairs(entry.childIds) do
-        if SteamLuaHelper.subscribeToWorkshopItem(cid) then n = n + 1 end
+    for sid in pairs(entry.childIds) do
+        if not ZBetterModList.known_sids[sid] and SteamLuaHelper.subscribeToWorkshopItem(sid) then
+            ZBetterModList.known_sids[sid] = true
+            logger:info("subscribing to %s", sid)
+            n = n + 1
+        end
     end
     return n
 end
 
--- Add a collection and subscribe to every one of its items. If children are
--- already cached, subscribes immediately; otherwise queues a subscribe-all to
--- fire once the async fetch resolves in Collections.poll().
 function Collections.addAndSubscribe(input)
     local id = Collections.add(input)
-    if not id then return nil end
-    local entry = Collections.byId[id]
-    if entry and entry.loaded then
-        Collections.subscribeAll(id)
-    else
-        Collections.subscribeOnLoad[id] = true
-        Collections.fetch(id)
-    end
+    if not id then return end
+
+    Collections.fetch(id)
     return id
 end
 
