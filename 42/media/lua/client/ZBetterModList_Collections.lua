@@ -10,13 +10,19 @@ local STORAGE_FILE = MOD_ID .. "_collections.txt"
 ZBetterModList = ZBetterModList or {}
 
 local Collections = {
-    ids             = {}, -- ordered list of collection IDs (string)
-    byId            = {}, -- id -> { title = "", childIds = { [workshopIdStr] = true }, loaded = bool }
-    pending         = {}, -- id -> SteamCollection handle (fetch in flight)
+    ids              = {}, -- ordered list of collection IDs (string)
+    byId             = {}, -- id -> { title = "", childIds = { [workshopIdStr] = true }, loaded = bool }
+    pending          = {}, -- id -> SteamCollection handle (fetch in flight)
+    pendingInstalls  = {}, -- workshopId -> true: subscribed this session, not yet seen on disk
 }
 ZBetterModList.Collections = Collections
 
 local logger = zdk.Logger.new(MOD_ID)
+
+-- Throttle: scan Steam's installed-item list every N prerender frames.
+-- getSteamWorkshopItemIDs() walks the workshop cache folder, so keep the rate modest.
+local INSTALL_POLL_EVERY    = 30
+local _installsPollCount    = 0
 
 -- Extract a Steam Workshop ID from a URL, or return the input unchanged if it
 -- is already a bare numeric ID. Accepts the common shapes:
@@ -142,6 +148,12 @@ end
 
 function Collections.remove(id)
     if not id or not Collections.byId[id] then return false end
+    local entry = Collections.byId[id]
+    if entry and entry.childIds then
+        for sid in pairs(entry.childIds) do
+            Collections.pendingInstalls[sid] = nil
+        end
+    end
     Collections.byId[id] = nil
     Collections.pending[id] = nil
     for i, v in ipairs(Collections.ids) do
@@ -193,9 +205,10 @@ function Collections.refreshAll()
     end
 end
 
--- Subscribe to every child workshop item of the given collection. Returns the
--- number of subscribe requests successfully dispatched to Steam (NOT the number
--- of downloads completed — subscriptions resolve asynchronously on Steam's side).
+-- Subscribe to every child workshop item of the given collection. Items that
+-- weren't already known on disk go into pendingInstalls so the UI layer can
+-- hot-reload the mod list as each one finishes downloading. Returns the number
+-- of subscribe requests successfully dispatched to Steam.
 function Collections.subscribeAll(id)
     local entry = id and Collections.byId[id]
     if not entry or not entry.loaded then return 0 end
@@ -203,12 +216,38 @@ function Collections.subscribeAll(id)
     local n = 0
     for sid in pairs(entry.childIds) do
         if not ZBetterModList.known_sids[sid] and SteamLuaHelper.subscribeToWorkshopItem(sid) then
-            ZBetterModList.known_sids[sid] = true
+            ZBetterModList.known_sids[sid]    = true
+            Collections.pendingInstalls[sid]  = true
             logger:info("subscribing to %s", sid)
             n = n + 1
         end
     end
     return n
+end
+
+-- Poll Steam for freshly-installed workshop items that we subscribed to.
+-- Returns true if at least one pending subscription became installed this tick,
+-- so the caller can refresh the mod list. Self-throttled via INSTALL_POLL_EVERY.
+function Collections.pollInstalls()
+    if table.isempty(Collections.pendingInstalls) then return false end
+    _installsPollCount = _installsPollCount + 1
+    if _installsPollCount < INSTALL_POLL_EVERY then return false end
+    _installsPollCount = 0
+
+    local ids = getSteamWorkshopItemIDs and getSteamWorkshopItemIDs()
+    if not ids or ids:isEmpty() then return false end
+    local installed = {}
+    for i = 0, ids:size() - 1 do installed[tostring(ids:get(i))] = true end
+
+    local any = false
+    for sid in pairs(Collections.pendingInstalls) do
+        if installed[sid] then
+            Collections.pendingInstalls[sid] = nil
+            logger:info("install detected for %s", sid)
+            any = true
+        end
+    end
+    return any
 end
 
 function Collections.addAndSubscribe(input)

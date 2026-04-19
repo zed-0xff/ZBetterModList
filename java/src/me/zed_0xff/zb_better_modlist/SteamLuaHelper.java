@@ -75,4 +75,14 @@ public final class SteamLuaHelper {
     public static boolean unsubscribeFromWorkshopItem(String workshopId) {
         return dispatch(workshopId, (api, ugc, id) -> api.SteamAPI_ISteamUGC_UnsubscribeItem(ugc, id));
     }
+
+    /**
+     * Invalidate PZ's cached mod-folder list so the next {@code getModDirectoryTable()} /
+     * {@code ModSelectorModel:reloadMods()} does a fresh disk scan. Useful after a workshop
+     * subscription completes mid-session — PZ's own FileWatcher is polling-based on macOS,
+     * so freshly-installed mods otherwise only show up after a full relaunch.
+     */
+    public static void resetModFolders() {
+        zombie.ZomboidFileSystem.instance.resetModFolders();
+    }
 }

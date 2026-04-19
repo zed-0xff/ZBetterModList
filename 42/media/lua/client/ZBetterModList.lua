@@ -413,6 +413,18 @@ if not hasModManager then
                     rebuildCollectionCombo(self)
                     if self.selectedCollectionId then self:updateView() end
                 end
+                -- Freshly-subscribed workshop items download asynchronously on
+                -- Steam's side; reload the mod list the moment any of them lands
+                -- on disk so new mods show up without restarting the game.
+                -- resetModFolders() is required because PZ caches the mod folder
+                -- list and its FileWatcher is polling-based (slow on macOS).
+                if Collections.pollInstalls() and ModSelector.instance then
+                    if SteamLuaHelper and SteamLuaHelper.resetModFolders then
+                        SteamLuaHelper.resetModFolders()
+                    end
+                    updateLists()
+                    ModSelector.instance:reloadMods()
+                end
             end,
 
             applyFilters = function(orig, self)
