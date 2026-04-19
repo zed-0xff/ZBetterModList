@@ -10,6 +10,14 @@ UI_EN = {
     UI_modselector_sortByName = "By name",
     UI_modselector_sortByDate = "By date",
 
+    UI_modselector_collection = "Collection:",
+    UI_modselector_collection_all = "All",
+    UI_modselector_collection_loading = "(loading...)",
+    UI_modselector_collection_add_prompt = "Enter Steam Workshop collection URL or ID:",
+    UI_modselector_collection_addTooltip = "Add a Steam Workshop collection by URL or ID (also subscribes to every item in it)",
+    UI_modselector_collection_removeTooltip = "Remove the selected collection from the list",
+    UI_modselector_collection_refreshTooltip = "Re-fetch title and children for the selected collection",
+
     UI_modselector_openWorkshopPage = "Open Workshop page",
     UI_modselector_tabInfo = "Info",
     UI_modselector_tabFiles = "Files",

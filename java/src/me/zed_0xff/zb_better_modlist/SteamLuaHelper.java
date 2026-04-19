@@ -1,98 +1,78 @@
 package me.zed_0xff.zb_better_modlist;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import com.sun.jna.Library;
+import com.sun.jna.Native;
+import com.sun.jna.Pointer;
 import me.zed_0xff.zombie_buddy.Exposer;
 
 /**
- * Lua-facing helpers for Steam API. Use this from Lua when you want decoded results or
- * convenience wrappers. For raw API behaviour, call {@link SteamUGC} and {@link SteamUtils}
- * directly (they mirror the Steam API).
+ * Lua-facing helpers for native Steam operations. PZ's own {@code zombie.core.znet.SteamWorkshop}
+ * has {@code SubscribeItem} but no unsubscribe, and its subscribe path requires a Java callback
+ * parameter that's awkward to drive from Lua — so we bind both via JNA directly.
  */
 @Exposer.LuaClass
 public final class SteamLuaHelper {
 
-    /** Callback type for SteamUGCQueryCompleted_t (match SDK; 3411 or 3401). */
-    private static final int STEAM_UGC_QUERY_COMPLETED_CALLBACK = 3411;
-    /** Struct size with padding; use 32 to avoid native overrun if layout differs. */
-    private static final int STEAM_UGC_QUERY_COMPLETED_STRUCT_SIZE = 32;
-
     private SteamLuaHelper() {}
 
+    private interface SteamAPI extends Library {
+        SteamAPI INSTANCE = load();
+        static SteamAPI load() {
+            try { return Native.load("steam_api", SteamAPI.class); } catch (Throwable t) { return null; }
+        }
+        int SteamAPI_GetHSteamUser();
+        int SteamAPI_GetHSteamPipe();
+        Pointer SteamAPI_SteamUGC_v021(int hSteamUser, int hSteamPipe);
+        long SteamAPI_ISteamUGC_SubscribeItem(Pointer self, long publishedFileId);
+        long SteamAPI_ISteamUGC_UnsubscribeItem(Pointer self, long publishedFileId);
+    }
+
+    private static volatile Pointer steamUGC;
+
+    private static Pointer getUGC() {
+        if (steamUGC != null) return steamUGC;
+        SteamAPI api = SteamAPI.INSTANCE;
+        if (api == null) return null;
+        int user = api.SteamAPI_GetHSteamUser();
+        int pipe = api.SteamAPI_GetHSteamPipe();
+        if (user == 0 || pipe == 0) return null;
+        steamUGC = api.SteamAPI_SteamUGC_v021(user, pipe);
+        return steamUGC;
+    }
+
+    @FunctionalInterface
+    private interface UGCCall { long invoke(SteamAPI api, Pointer ugc, long id); }
+
+    private static boolean dispatch(String workshopId, UGCCall call) {
+        if (workshopId == null || workshopId.isEmpty()) return false;
+        if (!zombie.core.znet.SteamUtils.isValidSteamID(workshopId)) return false;
+        Pointer ugc = getUGC();
+        if (ugc == null) return false;
+        long id = zombie.core.znet.SteamUtils.convertStringToSteamID(workshopId);
+        if (id == 0) return false;
+        return call.invoke(SteamAPI.INSTANCE, ugc, id) != 0;
+    }
+
     /**
-     * Subscribe to a Steam Workshop item by its workshop ID (e.g. "1234567890").
-     * Sends the request to Steam; the subscription completes asynchronously.
+     * Subscribe to a Steam Workshop item by its workshop ID. Non-blocking; the download happens
+     * asynchronously on Steam's side. Safe to call on IDs the user is already subscribed to
+     * (Steam will simply no-op).
      *
-     * @param workshopId Workshop published file ID as string.
-     * @return true if the subscribe request was sent, false if Steam unavailable or invalid ID.
+     * @param workshopId published file ID as a decimal string.
+     * @return true if the request was sent, false on bad input or Steam unavailable.
      */
     public static boolean subscribeToWorkshopItem(String workshopId) {
-        if (workshopId == null || workshopId.isEmpty()) return false;
-        if (!zombie.core.znet.SteamUtils.isValidSteamID(workshopId)) return false;
-        long id = zombie.core.znet.SteamUtils.convertStringToSteamID(workshopId);
-        return SteamUGC.SubscribeItem(id) != 0;
+        return dispatch(workshopId, (api, ugc, id) -> api.SteamAPI_ISteamUGC_SubscribeItem(ugc, id));
     }
 
     /**
-     * Unsubscribe from a Steam Workshop mod by its workshop ID (e.g. "1234567890").
-     * Sends the request to Steam; the item is removed after the game quits.
+     * Unsubscribe from a Steam Workshop mod by its workshop ID. Sends the request to Steam;
+     * the item is removed from disk after the game quits.
      *
-     * @param workshopId Workshop published file ID as string (from mod info / getWorkshopID).
-     * @return true if the unsubscribe request was sent, false if Steam unavailable or invalid ID.
+     * @param workshopId published file ID as a decimal string.
+     * @return true if the request was sent, false on bad input or Steam unavailable.
      */
     public static boolean unsubscribeFromWorkshopItem(String workshopId) {
-        if (workshopId == null || workshopId.isEmpty()) return false;
-        if (!zombie.core.znet.SteamUtils.isValidSteamID(workshopId)) return false;
-        long id = zombie.core.znet.SteamUtils.convertStringToSteamID(workshopId);
-        return SteamUGC.UnsubscribeItem(id);
+        return dispatch(workshopId, (api, ugc, id) -> api.SteamAPI_ISteamUGC_UnsubscribeItem(ugc, id));
     }
-
-    private static final int PZ_APP_ID = 108600;
-
-    /** Read uint64 at offset 0, little-endian (SteamUGCDetails_t first field is published file ID). */
-    private static long readPublishedFileId(byte[] b) {
-        if (b == null || b.length < 8) return 0;
-        long lo = (b[0] & 0xFF) | ((b[1] & 0xFF) << 8) | ((b[2] & 0xFF) << 16) | ((b[3] & 0xFF) << 24);
-        long hi = (b[4] & 0xFF) | ((b[5] & 0xFF) << 8) | ((b[6] & 0xFF) << 16) | ((b[7] & 0xFF) << 24);
-        return (lo & 0xFFFFFFFFL) | (hi << 32);
-    }
-
-    /**
-     * Create a QueryAllUGC request, block until complete, return list of published file IDs as strings.
-     * Params from Lua: queryType, matchingType, page, searchText (all optional; nil = use default).
-     * Defaults: queryType=19, matchingType=0, page=1, searchText="". Returns nil on failure; otherwise a table of ID strings (1-based in Lua).
-     * Blocking.
-     */
-    public static List<String> testQueryAllUGCRequests(Number queryType, Number matchingType, Number page, String searchText) {
-        int q = queryType != null ? queryType.intValue() : 19;
-        int m = matchingType != null ? matchingType.intValue() : 0;
-        int p = page != null ? page.intValue() : 1;
-        String search = searchText != null ? searchText : "";
-
-        long handle = SteamUGC.CreateQueryAllUGCRequest(q, m, PZ_APP_ID, PZ_APP_ID, p);
-        if (handle == 0 || handle == -1) return null;
-        if (!search.isEmpty()) SteamUGC.SetSearchText(handle, search);
-        long hAPICall = SteamUGC.SendQueryUGCRequest(handle);
-        if (hAPICall == 0) {
-            SteamUGC.ReleaseQueryUGCRequest(handle);
-            return null;
-        }
-        try {
-            while (!SteamUtils.IsAPICallCompleted(Long.valueOf(hAPICall))) {
-                try { Thread.sleep(50); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return Collections.emptyList(); }
-            }
-            List<String> ids = new ArrayList<>();
-            byte[] buffer = new byte[8192];
-            for (int i = 0; i < 10000; i++) {
-                if (!SteamUGC.GetQueryUGCResult(handle, i, buffer)) break;
-                long id = readPublishedFileId(buffer);
-                if (id != 0) ids.add(Long.toString(id));
-            }
-            return ids;
-        } finally {
-            SteamUGC.ReleaseQueryUGCRequest(handle);
-        }
-    }
-
 }

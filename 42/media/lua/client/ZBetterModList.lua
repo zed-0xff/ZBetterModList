@@ -1,5 +1,6 @@
 require "OptionScreens/ModSelector/ModListPanel"
 require "OptionScreens/ModSelector/ModListBox"
+require "ZBetterModList_Collections"
 
 local SHOW_MOD_OPTIONS = { "All", "Enabled", "Disabled", "Java", "New" }
 local SORT_OPTIONS     = { "Name", "Date" }
@@ -18,14 +19,22 @@ k_EUGCMatchingUGCType_UsableInGame = 10
 local MOD_ID = "ZBetterModList"
 local PZ_ID  = 108600
 
-ZBetterModList = ZBetterModList or {
-    known_mods_before = nil,
-    known_mods_after = nil,
-    -- Workshop IDs to hide from getModDirectoryTable (unsubscribed this session). Paths containing "/108600/<id>/mods/" are excluded.
-    hideWorkshopIds = {},
-}
+ZBetterModList = ZBetterModList or {}
+ZBetterModList.known_mods_before = ZBetterModList.known_mods_before
+ZBetterModList.known_mods_after  = ZBetterModList.known_mods_after
+-- Workshop IDs to hide from getModDirectoryTable (unsubscribed this session). Paths containing "/108600/<id>/mods/" are excluded.
+ZBetterModList.hideWorkshopIds   = ZBetterModList.hideWorkshopIds or {}
 
 local _unsubscribed = false
+
+local MID2SID = {} -- steam mods:               mod_id => steam_id
+local DIR2SID = {} -- 'workshop' dir mods: content_dir => steam_id
+
+-- for debug
+ZBetterModList.MID2SID = MID2SID
+ZBetterModList.DIR2SID = DIR2SID
+
+local logger = zdk.Logger.new(MOD_ID)
 
 -- Override getModDirectoryTable so unsubscribed workshop mod paths are removed from the list.
 zdk.hook({
@@ -149,11 +158,19 @@ local function getWorkshopID(modInfo)
     if workshopID and workshopID ~= "" then
         return workshopID
     end
-    local dir = modInfo:getDir()
-    if dir then
-        return string.match(tostring(dir):lower(), "[/\\]" .. tostring(PZ_ID) .. "[/\\](%d+)[/\\]mods[/\\]")
+    local sid = MID2SID[modInfo:getId()]
+    if sid then return sid end
+
+    local mod_dir = modInfo:getDir()
+    for wdir, sid in pairs(DIR2SID) do
+        if luautils.stringStarts(mod_dir, wdir) then
+            return sid
+        end
     end
+    logger:warn_once("getWorkshopID(): failed to get id for %s", modInfo:getId())
+    return nil
 end
+ZBetterModList.getWorkshopID = getWorkshopID
 
 local function getModTimeUpdated(modInfo)
     local workshopID = getWorkshopID(modInfo)
@@ -182,6 +199,21 @@ local function queryWorkshopDetails(panel)
     local workshopIDs = getSteamWorkshopItemIDs()
     if not workshopIDs or workshopIDs:isEmpty() then return end
 
+    for i=0, workshopIDs:size()-1 do
+        local sid = workshopIDs:get(i)
+        local mods = getSteamWorkshopItemMods(sid)
+        for j=0, mods:size()-1 do
+            local mod = mods:get(j)
+            MID2SID[mod:getId()] = sid
+        end
+    end
+
+    local items = getSteamWorkshopStagedItems()
+    for i=0, items:size()-1 do
+        local item = items:get(i)
+        DIR2SID[item:getContentFolder()] = item:getID()
+    end
+
     querySteamWorkshopItemDetails(workshopIDs, function(panel, status, info)
         if status == "Completed" then
             for i = 1, info:size() do
@@ -204,6 +236,88 @@ local LABEL_HGT         = FONT_HGT_MEDIUM + 6
 local UI_BORDER_SPACING = 10
 
 local hasModManager = getActivatedMods():contains("ModManager") or getActivatedMods():contains("\\ModManager")
+
+local Collections = ZBetterModList.Collections
+
+-- (Re)populates the Collection combo from Collections.ids. Preserves the currently
+-- selected collection ID when possible; falls back to "All" (index 1).
+-- Reflect selection state on per-collection buttons. Called from both the combo
+-- change handler and any code path that mutates the tracked-collection list.
+local function updateCollectionButtonsEnable(panel)
+    local hasSelection = panel.selectedCollectionId ~= nil
+    if panel.removeCollectionBtn then
+        panel.removeCollectionBtn:setEnable(hasSelection)
+    end
+    if panel.refreshCollectionBtn then
+        panel.refreshCollectionBtn:setEnable(hasSelection)
+    end
+end
+
+local function rebuildCollectionCombo(panel)
+    local combo = panel and panel.collectionCombo
+    if not combo then return end
+    local prevId = panel.selectedCollectionId
+    combo:clear()
+    combo:addOptionWithData(getText("UI_modselector_collection_all"), nil)
+    local newSelected = 1
+    for i, id in ipairs(Collections.ids) do
+        combo:addOptionWithData(Collections.displayName(id), id)
+        if id == prevId then newSelected = i + 1 end
+    end
+    combo.selected = newSelected
+    panel.selectedCollectionId = combo.options[newSelected] and combo.options[newSelected].data or nil
+    updateCollectionButtonsEnable(panel)
+end
+
+-- ISTextBox callback target: handles both "OK" and "CANCEL" clicks.
+local function onAddCollectionPrompt(panel, button)
+    if button.internal ~= "OK" then return end
+    local input = button.parent.entry:getText()
+    -- Adding a collection also subscribes to every item in it. For a cached
+    -- collection that fires immediately; for a fresh one the subscribe-all
+    -- runs from Collections.poll() once Steam returns the children.
+    local id = Collections.addAndSubscribe(input)
+    if not id then return end
+    panel.selectedCollectionId = id
+    rebuildCollectionCombo(panel)
+    panel:updateView()
+end
+
+local function onAddCollectionBtn(panel)
+    local w, h = 340, 160
+    local modal = ISTextBox:new(
+        (getCore():getScreenWidth() - w) / 2,
+        (getCore():getScreenHeight() - h) / 2,
+        w, h,
+        getText("UI_modselector_collection_add_prompt"),
+        "", panel, onAddCollectionPrompt)
+    modal:initialise()
+    modal:addToUIManager()
+end
+
+local function onRemoveCollectionBtn(panel)
+    local id = panel.selectedCollectionId
+    if not id then return end
+    Collections.remove(id)
+    panel.selectedCollectionId = nil
+    rebuildCollectionCombo(panel)
+    panel:updateView()
+end
+
+local function onCollectionComboChange(panel)
+    local combo = panel.collectionCombo
+    local opt = combo.options[combo.selected]
+    panel.selectedCollectionId = opt and opt.data or nil
+    updateCollectionButtonsEnable(panel)
+    panel:updateView()
+end
+
+local function onRefreshCollectionBtn(panel)
+    local id = panel.selectedCollectionId
+    if not id then return end
+    Collections.refresh(id)
+    rebuildCollectionCombo(panel)
+end
 
 if not hasModManager then
     zdk.hook({
@@ -241,6 +355,44 @@ if not hasModManager then
 
                 self.sortCombo.selected = readSortOrder()
                 self.filterPanel:addChild(self.sortCombo)
+
+                -- Collection label + combo + add/remove buttons, to the right of Sort.
+                local collLabel = ISLabel:new(self.sortCombo:getRight() + UI_BORDER_SPACING * 2, label.y, LABEL_HGT, getText("UI_modselector_collection"), 1.0, 1.0, 1.0, 1.0, UIFont.Medium, true)
+                self.filterPanel:addChild(collLabel)
+
+                local collWidth = getCore():getScreenWidth() / 10
+                self.collectionCombo = ISComboBox:new(collLabel:getRight() + UI_BORDER_SPACING, label.y, collWidth, BUTTON_HGT, self, onCollectionComboChange)
+                self.collectionCombo:initialise()
+                self.filterPanel:addChild(self.collectionCombo)
+
+                local btnW = BUTTON_HGT
+                self.addCollectionBtn = ISButton:new(self.collectionCombo:getRight() + UI_BORDER_SPACING, label.y, btnW, BUTTON_HGT, "+", self, onAddCollectionBtn)
+                self.addCollectionBtn:initialise()
+                self.addCollectionBtn.tooltip = getText("UI_modselector_collection_addTooltip")
+                self.filterPanel:addChild(self.addCollectionBtn)
+
+                self.removeCollectionBtn = ISButton:new(self.addCollectionBtn:getRight() + UI_BORDER_SPACING, label.y, btnW, BUTTON_HGT, "-", self, onRemoveCollectionBtn)
+                self.removeCollectionBtn:initialise()
+                self.removeCollectionBtn.tooltip = getText("UI_modselector_collection_removeTooltip")
+                self.filterPanel:addChild(self.removeCollectionBtn)
+
+                self.refreshCollectionBtn = ISButton:new(self.removeCollectionBtn:getRight() + UI_BORDER_SPACING, label.y, btnW, BUTTON_HGT, "", self, onRefreshCollectionBtn)
+                self.refreshCollectionBtn:initialise()
+                self.refreshCollectionBtn:setImage(getTexture("media/textures/ZBetterModList/refresh.png"))
+                self.refreshCollectionBtn.tooltip = getText("UI_modselector_collection_refreshTooltip")
+                self.filterPanel:addChild(self.refreshCollectionBtn)
+
+                rebuildCollectionCombo(self)
+                -- Refresh tracked collections once per mod-selector open.
+                Collections.refreshAll()
+            end,
+
+            prerender = function(orig, self)
+                orig(self)
+                if Collections.poll() then
+                    rebuildCollectionCombo(self)
+                    if self.selectedCollectionId then self:updateView() end
+                end
             end,
 
             applyFilters = function(orig, self)
@@ -283,6 +435,18 @@ if not hasModManager then
                         end
                     end
                     self.model.currentMods = newTbl
+                end
+
+                -- Collection filter (independent of showMode: intersect with current list)
+                if self.selectedCollectionId then
+                    local filtered = {}
+                    for _, modData in pairs(self.model.currentMods) do
+                        local wsId = getWorkshopID(modData.modInfo)
+                        if wsId and Collections.contains(self.selectedCollectionId, wsId) then
+                            table.insert(filtered, modData)
+                        end
+                    end
+                    self.model.currentMods = filtered
                 end
 
                 -- Sort (persist selection)
@@ -441,6 +605,11 @@ zdk.hook({
     [ModInfoPanel.Param] = {
         -- render values of javaJarFile and javaPkgName modInfoParams
         render = function(orig, self, ...)
+            -- fix workshop id not shown for 'workshop' folder items
+            if self.type == "WorkshopID" and self.workshopID == "" then
+                self.workshopID = getWorkshopID(self.modInfo) or ""
+            end
+
             orig(self, ...)
 
             local color = { r = 0.9, g = 0.4, b = 0.9, a = 0.9 }

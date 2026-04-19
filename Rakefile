@@ -23,3 +23,8 @@ end
 
 desc "build all"
 task :build => VERSIONS.keys.map { |ver| "build:#{ver}" }
+
+desc "show steam url"
+task :url do
+  puts "https://steamcommunity.com/sharedfiles/filedetails/?id=3709229404"
+end
