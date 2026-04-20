@@ -316,6 +316,106 @@ local function onRefreshCollectionBtn(panel)
     rebuildCollectionCombo(panel)
 end
 
+-- Topologically sort modInfo entries so dependencies come before dependents.
+-- Edges (A loads before B) are derived from each mod's own metadata:
+--   B:getRequire()    → every R in list must load before B  (R → B)
+--   B:getLoadAfter()  → every A in list must load before B  (A → B)
+--   B:getLoadBefore() → B must load before every X in list  (B → X)
+-- Edges to mods outside the input list are ignored. Cycles (rare; only
+-- happen with broken metadata) are appended at the end in original order.
+-- Stable: when several mods are simultaneously "ready", they're emitted
+-- in their original snapshot order.
+local function topoSortMods(snapshot)
+    local deps  = {} -- id -> set of ids that must come before id
+    local index = {} -- id -> modInfo (membership filter)
+    for _, mi in ipairs(snapshot) do
+        local id = mi:getId()
+        index[id] = mi
+        deps[id]  = {}
+    end
+
+    local function addEdge(beforeId, afterId)
+        if beforeId == afterId then return end
+        if not index[beforeId] or not index[afterId] then return end
+        deps[afterId][beforeId] = true
+    end
+
+    local function eachId(list, fn)
+        if not list then return end
+        for i = 0, list:size() - 1 do fn(list:get(i)) end
+    end
+
+    for _, mi in ipairs(snapshot) do
+        local id = mi:getId()
+        eachId(mi:getRequire(),    function(other) addEdge(other, id) end)
+        eachId(mi:getLoadAfter(),  function(other) addEdge(other, id) end)
+        eachId(mi:getLoadBefore(), function(other) addEdge(id, other) end)
+    end
+
+    local placed, result = {}, {}
+    local changed = true
+    while changed do
+        changed = false
+        for _, mi in ipairs(snapshot) do
+            local id = mi:getId()
+            if not placed[id] then
+                local ready = true
+                for depId in pairs(deps[id]) do
+                    if not placed[depId] then ready = false; break end
+                end
+                if ready then
+                    placed[id] = true
+                    result[#result + 1] = mi
+                    changed = true
+                end
+            end
+        end
+    end
+    for _, mi in ipairs(snapshot) do
+        if not placed[mi:getId()] then result[#result + 1] = mi end
+    end
+    return result
+end
+
+-- Bulk-toggle every mod currently visible in the list.
+--
+-- Vanilla ModSelectorModel:forceActivateMods calls refreshMods(), which calls
+-- view:updateView(), which calls applyFilters(), which table.wipe()s
+-- currentMods. Iterating currentMods directly with pairs() therefore silently
+-- skips most mods. We snapshot first, then iterate the snapshot.
+--
+-- The snapshot is topologically sorted by dependencies + load-before/after
+-- so on enable each mod's prerequisites are processed first (cheaper than
+-- relying on forceActivateMods' internal recursion), and on disable we
+-- reverse the order so dependents are disabled before their deps.
+local function bulkActivate(activate)
+    local sel = ModSelector.instance
+    if not sel or not sel.model or not sel.model.currentMods then return end
+
+    local snapshot = {}
+    for _, modData in ipairs(sel.model.currentMods) do
+        snapshot[#snapshot + 1] = modData.modInfo
+    end
+
+    local ordered = topoSortMods(snapshot)
+    if not activate then
+        local rev = {}
+        for i = #ordered, 1, -1 do rev[#rev + 1] = ordered[i] end
+        ordered = rev
+    end
+
+    for _, modInfo in ipairs(ordered) do
+        sel.model:forceActivateMods(modInfo, activate)
+    end
+
+    if sel.modListPanel and sel.modListPanel.updateView then
+        sel.modListPanel:updateView()
+    end
+end
+
+local function onEnableAllBtn()  bulkActivate(true)  end
+local function onDisableAllBtn() bulkActivate(false) end
+
 local function updateLists()
     local workshopIDs = getSteamWorkshopItemIDs()
     if not workshopIDs or workshopIDs:isEmpty() then return end
@@ -337,6 +437,26 @@ local function updateLists()
         DIR2SID[item:getContentFolder()] = item:getID()
         ZBetterModList.known_sids[item:getID()] = true
     end
+end
+
+-- Vanilla helpButton padding (JOYPAD_TEX_SIZE 32 + UI_BORDER_SPACING*2) — kept in
+-- sync so our top-bar buttons match Help / Accept / Mods Order in size.
+local TOP_BTN_PADDING = 32 + UI_BORDER_SPACING * 2
+
+-- Style a top-bar button to match the vanilla Help / Mods Order look:
+-- faint white border, small font, no accept/cancel tinting, fixed size.
+local function styleTopBarButton(btn, tooltipText)
+    btn:initialise()
+    btn:instantiate()
+    btn:setAnchorLeft(true)
+    btn:setAnchorRight(false)
+    btn:setAnchorTop(true)
+    btn:setAnchorBottom(false)
+    btn.borderColor = {r = 1, g = 1, b = 1, a = 0.1}
+    btn:setFont(UIFont.Small)
+    btn:ignoreWidthChange()
+    btn:ignoreHeightChange()
+    btn.tooltip = tooltipText
 end
 
 if not hasModManager then
@@ -753,6 +873,21 @@ zdk.hook({
     ModSelector = {
         create = function(orig, self)
             orig(self)
+
+            -- Enable All / Disable All at the top-left, on the same row as helpButton.
+            local enLabel  = getText("UI_modselector_enableAll")
+            local disLabel = getText("UI_modselector_disableAll")
+            local enW      = TOP_BTN_PADDING + getTextManager():MeasureStringX(UIFont.Small, enLabel)
+            local disW     = TOP_BTN_PADDING + getTextManager():MeasureStringX(UIFont.Small, disLabel)
+            local btnY     = UI_BORDER_SPACING + 1
+
+            self.enableAllBtn = ISButton:new(UI_BORDER_SPACING + 1, btnY, enW, BUTTON_HGT, enLabel, self, onEnableAllBtn)
+            styleTopBarButton(self.enableAllBtn, getText("UI_modselector_enableAllTooltip"))
+            self:addChild(self.enableAllBtn)
+
+            self.disableAllBtn = ISButton:new(self.enableAllBtn:getRight() + UI_BORDER_SPACING, btnY, disW, BUTTON_HGT, disLabel, self, onDisableAllBtn)
+            styleTopBarButton(self.disableAllBtn, getText("UI_modselector_disableAllTooltip"))
+            self:addChild(self.disableAllBtn)
 
             local origInfoPanel = self.modInfoPanel
             local left = origInfoPanel:getX()
