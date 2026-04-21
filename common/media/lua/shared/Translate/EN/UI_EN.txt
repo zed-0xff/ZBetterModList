@@ -24,6 +24,10 @@ UI_EN = {
     UI_modselector_disableAllTooltip = "Disable every mod currently visible in the list",
 
     UI_modselector_openWorkshopPage = "Open Workshop page",
+    UI_modselector_navBackTooltip = "Back to previous mod (Backspace)",
+
     UI_modselector_tabInfo = "Info",
     UI_modselector_tabFiles = "Files",
+
+    Dependents = "Dependents",
 }
