@@ -8,6 +8,6 @@ icon=modIcon.png
 require=\ZombieBuddy,\zdk
 javaJarFile=media/java/client/ZBetterModList.jar
 javaPkgName=me.zed_0xff.zb_better_modlist
-ZBVersionMin=2.1.0
+ZBVersionMin=2.0.0
 
 incompatible=\ModManager

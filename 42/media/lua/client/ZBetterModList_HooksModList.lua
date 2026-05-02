@@ -119,6 +119,10 @@ if not I.hasModManager then
                             if not ZBetterModList.known_mods_before[modData.modInfo:getId()] then
                                 table.insert(newTbl, modData)
                             end
+                        elseif showMode == "B41" then
+                            if I.isB41Mod(modData.modInfo) then
+                                table.insert(newTbl, modData)
+                            end
                         end
                     end
                     self.model.currentMods = newTbl

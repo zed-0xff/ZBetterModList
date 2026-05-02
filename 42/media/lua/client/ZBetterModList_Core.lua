@@ -102,6 +102,10 @@ local function isJavaMod(modInfo)
     return (getRawModInfo(modInfo:getId()).javajarfile ~= nil)
 end
 
+local function isB41Mod(modInfo)
+    return modInfo:getDir() == modInfo:getVersionDir() -- ZBExhume41 sets versionDir to modDir
+end
+
 local function readKnownList()
     local result = {}
     local reader = getFileReader(MOD_ID .. "_known.txt", false)
@@ -481,7 +485,7 @@ local function markUnsubscribed()
     _unsubscribed = true
 end
 
-local SHOW_MOD_OPTIONS = { "All", "Enabled", "Disabled", "Java", "New" }
+local SHOW_MOD_OPTIONS = { "All", "Enabled", "Disabled", "Java", "New", (getActivatedMods():contains("ZBExhume41") and "B41" or nil) }
 local SORT_OPTIONS     = { "Name", "Date" }
 
 --[[ Shared bindings for hook modules (single source of truth). ]]
@@ -511,6 +515,7 @@ ZBetterModList._I = {
 
     updateLists      = updateLists,
     isJavaMod        = isJavaMod,
+    isB41Mod         = isB41Mod,
     getWorkshopID    = getWorkshopID,
     getRawModInfo    = getRawModInfo,
     queryWorkshopDetails = queryWorkshopDetails,

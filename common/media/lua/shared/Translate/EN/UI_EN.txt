@@ -5,6 +5,7 @@ UI_EN = {
     UI_modselector_showEnabled = "Enabled",
     UI_modselector_showJava = "JAVA",
     UI_modselector_showNew = "New",
+    UI_modselector_showB41 = "B41",
 
     UI_modselector_sortBy = "Sort:",
     UI_modselector_sortByName = "By name",
