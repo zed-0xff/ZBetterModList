@@ -80,8 +80,8 @@ public final class UGCResponsePending {
         ArrayList<KahluaTable> list = new ArrayList<>();
         UGCResponse resp = new UGCResponse(queryHandle, RESULTS_PER_PAGE);
         Long handleObj = Long.valueOf(queryHandle);
+        byte[] detailsBuf = new byte[DETAILS_BUF_SIZE];
         for (int i = 0; i < RESULTS_PER_PAGE; i++) {
-            byte[] detailsBuf = new byte[DETAILS_BUF_SIZE];
             boolean gotResult = SteamUGC.GetQueryUGCResult(handleObj, i, detailsBuf);
             if (!gotResult) break;
             SteamUGC.DecodedUGCDetails details = SteamUGC.DecodeUGCDetails(detailsBuf);

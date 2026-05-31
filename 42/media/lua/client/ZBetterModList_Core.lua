@@ -89,6 +89,9 @@ local function parseModInfo(mod_id)
 end
 
 local _mod_info_cache = {}
+local _mod_name_lower_cache = {}
+local _mod_time_cache = {}
+local _last_sort_order_written = nil
 local function getRawModInfo(mod_id)
     local cached = _mod_info_cache[mod_id]
     if not cached then
@@ -104,6 +107,18 @@ end
 
 local function isB41Mod(modInfo)
     return modInfo:getDir() == modInfo:getVersionDir() -- ZBExhume41 sets versionDir to modDir
+end
+
+local function getModNameLower(modInfo)
+    local modId = modInfo and modInfo:getId()
+    if not modId then return "" end
+
+    local cached = _mod_name_lower_cache[modId]
+    if cached then return cached end
+
+    cached = (modInfo:getName() or ""):lower()
+    _mod_name_lower_cache[modId] = cached
+    return cached
 end
 
 local function readKnownList()
@@ -145,28 +160,38 @@ local function readSortOrder()
 end
 
 local function writeSortOrder(order)
+    order = tonumber(order) or 1
+    if _last_sort_order_written == order then
+        return
+    end
+
     local writer = getFileWriter(MOD_ID .. "_sort.txt", true, false)
     if writer then
         writer:write(tostring(order) .. "\n")
         writer:close()
+        _last_sort_order_written = order
     end
 end
 
 local function getWorkshopID(modInfo)
+    local modId = modInfo:getId()
+    local cached = MID2SID[modId]
+    if cached then return cached end
+
     local workshopID = modInfo:getWorkshopID()
     if workshopID and workshopID ~= "" then
+        MID2SID[modId] = workshopID
         return workshopID
     end
-    local sid = MID2SID[modInfo:getId()]
-    if sid then return sid end
 
     local mod_dir = modInfo:getDir()
     for wdir, sid in pairs(DIR2SID) do
         if luautils.stringStarts(mod_dir, wdir) then
+            MID2SID[modId] = sid
             return sid
         end
     end
-    logger:warn_once("getWorkshopID(): failed to get id for %s", modInfo:getId())
+    logger:warn_once("getWorkshopID(): failed to get id for %s", modId)
     return nil
 end
 ZBetterModList.getWorkshopID = getWorkshopID
@@ -197,11 +222,21 @@ end
 ZBetterModList.getDependentMods = getDependentMods
 
 local function getModTimeUpdated(modInfo)
-    local workshopID = getWorkshopID(modInfo)
-    if workshopID and ZBetterModList.timeUpdated then
-        return ZBetterModList.timeUpdated[workshopID] or 0
+    local modId = modInfo:getId()
+    local version = ZBetterModList.timeUpdatedVersion or 0
+    local cached = _mod_time_cache[modId]
+    if cached and cached.version == version then
+        return cached.value
     end
-    return 0
+
+    local workshopID = getWorkshopID(modInfo)
+    local value = 0
+    if workshopID and ZBetterModList.timeUpdated then
+        value = ZBetterModList.timeUpdated[workshopID] or 0
+    end
+
+    _mod_time_cache[modId] = { version = version, value = value }
+    return value
 end
 
 local function formatAge(timestamp)
@@ -219,6 +254,8 @@ local function queryWorkshopDetails(panel)
     if ZBetterModList.workshopQueryDone then return end
     ZBetterModList.workshopQueryDone = true
     ZBetterModList.timeUpdated = {}
+    ZBetterModList.timeUpdatedVersion = (ZBetterModList.timeUpdatedVersion or 0) + 1
+    _mod_time_cache = {}
 
     local workshopIDs = getSteamWorkshopItemIDs()
     if not workshopIDs or workshopIDs:isEmpty() then return end
@@ -229,12 +266,16 @@ local function queryWorkshopDetails(panel)
                 local details = info:get(i - 1)
                 ZBetterModList.timeUpdated[details:getIDString()] = details:getTimeUpdated()
             end
+            ZBetterModList.timeUpdatedVersion = (ZBetterModList.timeUpdatedVersion or 0) + 1
+            _mod_time_cache = {}
             if panel.sortCombo and panel.sortCombo.selected == 2 then
                 panel:updateView()
             end
         end
     end, panel)
 end
+
+_last_sort_order_written = readSortOrder()
 
 local FONT_HGT_SMALL    = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM   = getTextManager():getFontHeight(UIFont.Medium)
@@ -518,6 +559,7 @@ ZBetterModList._I = {
     isB41Mod         = isB41Mod,
     getWorkshopID    = getWorkshopID,
     getRawModInfo    = getRawModInfo,
+    getModNameLower  = getModNameLower,
     queryWorkshopDetails = queryWorkshopDetails,
     getModTimeUpdated = getModTimeUpdated,
     formatAge        = formatAge,
