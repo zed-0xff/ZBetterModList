@@ -3,7 +3,7 @@ task :default => :build
 MOD_ID   = "ZBetterModList"
 MOD_TYPE = "client"
 VERSIONS = {
-  "42" => "17",
+  "42" => "25",
 }
 
 VERSIONS.each do |ver, jdk_ver|
