@@ -3,6 +3,9 @@
 *.kra
 *.xcf
 
+.project
+.settings
+
 build
 tmp
 
