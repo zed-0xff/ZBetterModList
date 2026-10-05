@@ -79,6 +79,9 @@ if not I.hasModManager then
                     if SteamLuaHelper and SteamLuaHelper.resetModFolders then
                         SteamLuaHelper.resetModFolders()
                     end
+                    if ModListHelper and ModListHelper.clearCache then
+                        ModListHelper.clearCache()
+                    end
                     I.updateLists()
                     ModSelector.instance:reloadMods()
                 end
@@ -91,64 +94,83 @@ if not I.hasModManager then
 
                 I.queryWorkshopDetails(self)
 
+                local currentMods = self.model.currentMods
+                if not currentMods or #currentMods == 0 then
+                    return
+                end
+
                 local showMode = I.SHOW_MOD_OPTIONS[self.showCombo.selected]
                 if showMode == "All" then
                     if ZBetterModList.known_mods_after == nil then
                         ZBetterModList.known_mods_after = {}
-                        for _, modData in pairs(self.model.currentMods) do
+                        for i = 1, #currentMods do
+                            local modData = currentMods[i]
                             ZBetterModList.known_mods_after[modData.modInfo:getId()] = true
                         end
                         I.writeKnownList(ZBetterModList.known_mods_after)
                     end
                 else
                     local newTbl = {}
-                    for _, modData in pairs(self.model.currentMods) do
+                    for i = 1, #currentMods do
+                        local modData = currentMods[i]
                         if showMode == "Enabled" then
                             if modData.isActive then
-                                table.insert(newTbl, modData)
+                                newTbl[#newTbl + 1] = modData
                             end
                         elseif showMode == "Disabled" then
                             if not modData.isActive then
-                                table.insert(newTbl, modData)
+                                newTbl[#newTbl + 1] = modData
                             end
                         elseif showMode == "Java" then
                             if I.isJavaMod(modData.modInfo) then
-                                table.insert(newTbl, modData)
+                                newTbl[#newTbl + 1] = modData
                             end
                         elseif showMode == "New" then
                             if not ZBetterModList.known_mods_before[modData.modInfo:getId()] then
-                                table.insert(newTbl, modData)
+                                newTbl[#newTbl + 1] = modData
                             end
                         elseif showMode == "B41" then
                             if I.isB41Mod(modData.modInfo) then
-                                table.insert(newTbl, modData)
+                                newTbl[#newTbl + 1] = modData
                             end
                         end
                     end
-                    self.model.currentMods = newTbl
+                    currentMods = newTbl
+                    self.model.currentMods = currentMods
                 end
 
                 if self.selectedCollectionId then
-                    local filtered = {}
-                    for _, modData in pairs(self.model.currentMods) do
-                        local wsId = I.getWorkshopID(modData.modInfo)
-                        if wsId and I.Collections.contains(self.selectedCollectionId, wsId) then
-                            table.insert(filtered, modData)
+                    local entry = I.Collections.byId and I.Collections.byId[self.selectedCollectionId]
+                    local childIds = entry and entry.childIds
+                    if childIds then
+                        local filtered = {}
+                        for i = 1, #currentMods do
+                            local modData = currentMods[i]
+                            local wsId = I.getWorkshopID(modData.modInfo)
+                            if wsId and childIds[wsId] then
+                                filtered[#filtered + 1] = modData
+                            end
                         end
+                        currentMods = filtered
+                        self.model.currentMods = currentMods
+                    else
+                        self.model.currentMods = {}
+                        currentMods = self.model.currentMods
                     end
-                    self.model.currentMods = filtered
                 end
 
                 I.writeSortOrder(self.sortCombo.selected)
                 local sortMode = I.SORT_OPTIONS[self.sortCombo.selected]
-                if sortMode == "Date" then
-                    table.sort(self.model.currentMods, function(a, b)
-                        return I.getModTimeUpdated(a.modInfo) > I.getModTimeUpdated(b.modInfo)
-                    end)
-                else
-                    table.sort(self.model.currentMods, function(a, b)
-                        return a.modInfo:getName():lower() < b.modInfo:getName():lower()
-                    end)
+                if #currentMods > 1 then
+                    if sortMode == "Date" then
+                        table.sort(currentMods, function(a, b)
+                            return I.getModTimeUpdated(a.modInfo) > I.getModTimeUpdated(b.modInfo)
+                        end)
+                    else
+                        table.sort(currentMods, function(a, b)
+                            return I.getModNameLower(a.modInfo) < I.getModNameLower(b.modInfo)
+                        end)
+                    end
                 end
             end,
         },

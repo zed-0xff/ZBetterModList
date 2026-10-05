@@ -3,6 +3,8 @@ package me.zed_0xff.zb_better_modlist;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 import me.zed_0xff.zombie_buddy.Exposer;
 import zombie.gameStates.ChooseGameInfo;
@@ -10,7 +12,16 @@ import zombie.gameStates.ChooseGameInfo;
 @Exposer.LuaClass
 public class ModListHelper {
 
+    private static final Map<String, ArrayList<String>> FILE_LIST_CACHE = new HashMap<>();
+
     public static ArrayList<String> listFiles(String modId) {
+        synchronized (FILE_LIST_CACHE) {
+            ArrayList<String> cached = FILE_LIST_CACHE.get(modId);
+            if (cached != null) {
+                return cached;
+            }
+        }
+
         ArrayList<String> result = new ArrayList<>();
         var mod = ChooseGameInfo.getAvailableModDetails(modId);
         if (mod == null) return result;
@@ -20,7 +31,25 @@ public class ModListHelper {
             collectFiles(modDir, "", result);
         }
         Collections.sort(result);
+
+        synchronized (FILE_LIST_CACHE) {
+            FILE_LIST_CACHE.put(modId, result);
+        }
+
         return result;
+    }
+
+    public static void clearCache() {
+        synchronized (FILE_LIST_CACHE) {
+            FILE_LIST_CACHE.clear();
+        }
+    }
+
+    public static void clearCacheFor(String modId) {
+        if (modId == null) return;
+        synchronized (FILE_LIST_CACHE) {
+            FILE_LIST_CACHE.remove(modId);
+        }
     }
 
     private static void collectFiles(File dir, String prefix, ArrayList<String> result) {

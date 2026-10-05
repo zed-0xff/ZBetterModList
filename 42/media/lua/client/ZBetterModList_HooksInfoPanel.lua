@@ -107,6 +107,9 @@ local function onUnsubscribeBtn(panel)
     I.markUnsubscribed()
     ZBetterModList.hideWorkshopIds[workshopID] = true
     if ModSelector.instance then
+        if ModListHelper and ModListHelper.clearCache then
+            ModListHelper.clearCache()
+        end
         ModSelector.instance:reloadMods()
         ModSelector.instance.modInfoPanel:setVisible(false)
     end
